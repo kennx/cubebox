@@ -250,7 +250,9 @@ static void lcd_set_backlight(uint8_t brightness)
     ESP_LOGI(TAG, "Setting backlight: brightness=%d, bl_val=0x%02X, cmd=0x%08X", brightness, bl_val, cmd);
     esp_err_t ret = esp_lcd_panel_io_tx_param(lcd_io, cmd, &bl_val, 1);
     ESP_LOGI(TAG, "Backlight command result: %s", esp_err_to_name(ret));
-}static bool notify_lvgl_flush_ready(esp_lcd_panel_io_handle_t panel_io, esp_lcd_panel_io_event_data_t *edata, void *user_ctx)
+}
+
+static bool notify_lvgl_flush_ready(esp_lcd_panel_io_handle_t panel_io, esp_lcd_panel_io_event_data_t *edata, void *user_ctx)
 {
     lv_disp_drv_t *disp_driver = (lv_disp_drv_t *)user_ctx;
     lv_disp_flush_ready(disp_driver);
@@ -437,9 +439,9 @@ static void gui_task(void *arg)
     /* 构建 60 秒极坐标圆形矩阵点阵 */
     for (int i = 0; i < RING_DOTS; i++) {
         /* 每一个点对应极坐标角度，以正上方为 0 秒 (theta = -90度) */
-        float theta = (i * 6.0f - 90.0f) * M_PI / 180.0f;
-        int x_pos = (int)(240.0f + RING_RADIUS * cosf(theta)) - 2; // 圆点半径为2 (大小4像素)，做中心补偿
-        int y_pos = (int)(240.0f + RING_RADIUS * sinf(theta)) - 2;
+        float theta = (i * 6.0f - 90.0f) * (float)M_PI / 180.0f;
+        int x_pos = (int)((LCD_WIDTH / 2.0f) + RING_RADIUS * cosf(theta)) - 2; // 圆点半径为2 (大小4像素)，做中心补偿
+        int y_pos = (int)((LCD_HEIGHT / 2.0f) + RING_RADIUS * sinf(theta)) - 2;
         
         lv_obj_t *ring_dot = lv_obj_create(scr);
         lv_obj_set_size(ring_dot, 4, 4);
@@ -495,16 +497,15 @@ static void gui_task(void *arg)
                 
                 /* 2. 刷新秒环红点秒针 */
                 static int last_sec = -1;
-                if (last_sec != -1 && last_sec < RING_DOTS) {
+                if (last_sec >= 0 && last_sec < RING_DOTS) {
                     // 恢复上一次秒点为普通暗灰圆环色，尺寸 4x4
                     lv_obj_set_size(ring_dots[last_sec], 4, 4);
                     lv_obj_set_style_bg_color(ring_dots[last_sec], lv_color_make(38, 38, 38), 0);
                     
-                    // 重新微调坐标，补偿 4x4 居中偏移 (圆心位置补偿 225 半径)
-                    float last_theta = (last_sec * 6.0f - 90.0f) * (float)M_PI / 180.0f;
-                    int lx = (int)((LCD_WIDTH / 2.0f) + RING_RADIUS * cosf(last_theta)) - 2;
-                    int ly = (int)((LCD_HEIGHT / 2.0f) + RING_RADIUS * sinf(last_theta)) - 2;
-                    lv_obj_set_pos(ring_dots[last_sec], lx, ly);
+                    // 重新微调坐标，补偿 4x4 居中偏移 (从-3 offset变回-2 offset，向右下移动1像素)
+                    int lx = lv_obj_get_x(ring_dots[last_sec]);
+                    int ly = lv_obj_get_y(ring_dots[last_sec]);
+                    lv_obj_set_pos(ring_dots[last_sec], lx + 1, ly + 1);
                 }
                 
                 if (sec < RING_DOTS) {
@@ -512,11 +513,10 @@ static void gui_task(void *arg)
                     lv_obj_set_size(ring_dots[sec], 6, 6);
                     lv_obj_set_style_bg_color(ring_dots[sec], lv_color_make(255, 0, 64), 0); // 亮红 `#FF0040`
                     
-                    // 重新微调坐标，补偿 6x6 居中偏移
-                    float curr_theta = (sec * 6.0f - 90.0f) * (float)M_PI / 180.0f;
-                    int cx = (int)((LCD_WIDTH / 2.0f) + RING_RADIUS * cosf(curr_theta)) - 3;
-                    int cy = (int)((LCD_HEIGHT / 2.0f) + RING_RADIUS * sinf(curr_theta)) - 3;
-                    lv_obj_set_pos(ring_dots[sec], cx, cy);
+                    // 重新微调坐标，补偿 6x6 居中偏移 (从-2 offset放大为-3 offset，向左上移动1像素)
+                    int cx = lv_obj_get_x(ring_dots[sec]);
+                    int cy = lv_obj_get_y(ring_dots[sec]);
+                    lv_obj_set_pos(ring_dots[sec], cx - 1, cy - 1);
                     
                     last_sec = sec;
                 }
