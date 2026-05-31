@@ -12,6 +12,7 @@
 #include "esp_lcd_sh8601.h"
 #include "lvgl.h"
 #include "esp_timer.h"
+#include <math.h>
 
 LV_FONT_DECLARE(lv_font_montserrat_48);
 
@@ -391,6 +392,7 @@ static void lcd_init(void)
 static void gui_task(void *arg)
 {
     static lv_obj_t *dot_objs[8][5][7];
+    static lv_obj_t *ring_dots[RING_DOTS];
     /* Set screen background to black */
     lv_obj_t *scr = lv_scr_act();
     lv_obj_set_style_bg_color(scr, lv_color_black(), 0);
@@ -430,6 +432,25 @@ static void gui_task(void *arg)
                 dot_objs[c][x][y] = dot;
             }
         }
+    }
+
+    /* 构建 60 秒极坐标圆形矩阵点阵 */
+    for (int i = 0; i < RING_DOTS; i++) {
+        /* 每一个点对应极坐标角度，以正上方为 0 秒 (theta = -90度) */
+        float theta = (i * 6.0f - 90.0f) * M_PI / 180.0f;
+        int x_pos = (int)(240.0f + RING_RADIUS * cosf(theta)) - 2; // 圆点半径为2 (大小4像素)，做中心补偿
+        int y_pos = (int)(240.0f + RING_RADIUS * sinf(theta)) - 2;
+        
+        lv_obj_t *ring_dot = lv_obj_create(scr);
+        lv_obj_set_size(ring_dot, 4, 4);
+        lv_obj_set_pos(ring_dot, x_pos, y_pos);
+        
+        lv_obj_set_style_radius(ring_dot, LV_RADIUS_CIRCLE, 0);
+        lv_obj_set_style_border_width(ring_dot, 0, 0);
+        lv_obj_set_style_bg_color(ring_dot, lv_color_make(38, 38, 38), 0); // 边缘秒环默认底色 `#262626`
+        lv_obj_set_style_bg_opa(ring_dot, LV_OPA_COVER, 0);
+        
+        ring_dots[i] = ring_dot;
     }
 
     uint32_t last_rtc_update = 0;
