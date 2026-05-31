@@ -390,25 +390,47 @@ static void lcd_init(void)
 
 static void gui_task(void *arg)
 {
+    static lv_obj_t *dot_objs[8][5][7];
     /* Set screen background to black */
     lv_obj_t *scr = lv_scr_act();
     lv_obj_set_style_bg_color(scr, lv_color_black(), 0);
     lv_obj_set_style_bg_opa(scr, LV_OPA_COVER, 0);
 
-    /* Create clock Label */
-    lv_obj_t *time_label = lv_label_create(scr);
+    /* 创建点阵容器并使其水平居中 */
+    lv_obj_t *time_container = lv_obj_create(scr);
+    lv_obj_set_size(time_container, 374, 54);
+    /* 移除容器背景、边框、内边距，使其完全透明 */
+    lv_obj_set_style_bg_opa(time_container, LV_OPA_TRANSP, 0);
+    lv_obj_set_style_border_width(time_container, 0, 0);
+    lv_obj_set_style_pad_all(time_container, 0, 0);
+    lv_obj_align(time_container, LV_ALIGN_CENTER, 0, 0); // 完美居中
     
-    /* Set text font to Montserrat 48 */
-    lv_obj_set_style_text_font(time_label, &lv_font_montserrat_48, 0);
-    
-    /* Set text color to bright yellow (approx 0xFFE0 in RGB565) */
-    lv_obj_set_style_text_color(time_label, lv_color_make(255, 224, 0), 0);
-    
-    /* Center the label perfectly horizontally and vertically */
-    lv_obj_center(time_label);
-    
-    /* Initial temporary placeholder text */
-    lv_label_set_text(time_label, "00:00:00");
+    /* 批量创建 8 个字符的点阵网格 */
+    for (int c = 0; c < 8; c++) {
+        lv_obj_t *char_container = lv_obj_create(time_container);
+        lv_obj_set_size(char_container, 38, 54);
+        lv_obj_set_style_bg_opa(char_container, LV_OPA_TRANSP, 0);
+        lv_obj_set_style_border_width(char_container, 0, 0);
+        lv_obj_set_style_pad_all(char_container, 0, 0);
+        /* 设置水平排列 X 轴偏移 */
+        lv_obj_set_pos(char_container, c * (38 + CHAR_GAP), 0);
+        
+        for (int x = 0; x < 5; x++) {
+            for (int y = 0; y < 7; y++) {
+                lv_obj_t *dot = lv_obj_create(char_container);
+                lv_obj_set_size(dot, DOT_SIZE, DOT_SIZE);
+                /* 设置像素点网格内相对坐标 */
+                lv_obj_set_pos(dot, x * (DOT_SIZE + DOT_GAP), y * (DOT_SIZE + DOT_GAP));
+                /* 样式使像素点为圆形，并默认亮起暗灰色 */
+                lv_obj_set_style_radius(dot, LV_RADIUS_CIRCLE, 0);
+                lv_obj_set_style_border_width(dot, 0, 0);
+                lv_obj_set_style_bg_color(dot, lv_color_make(26, 26, 26), 0); // 暗色底 `#1A1A1A`
+                lv_obj_set_style_bg_opa(dot, LV_OPA_COVER, 0);
+                
+                dot_objs[c][x][y] = dot;
+            }
+        }
+    }
 
     uint32_t last_rtc_update = 0;
     uint8_t hour = 0, min = 0, sec = 0;
@@ -421,7 +443,7 @@ static void gui_task(void *arg)
             if (rtc_pcf85063_get_time(&hour, &min, &sec) == ESP_OK) {
                 char buf[32];
                 snprintf(buf, sizeof(buf), "%02d:%02d:%02d", hour, min, sec);
-                lv_label_set_text(time_label, buf);
+                // lv_label_set_text(time_label, buf);
                 ESP_LOGI(TAG, "Updated display: %s", buf);
             } else {
                 ESP_LOGE(TAG, "Failed to read RTC for display update");
