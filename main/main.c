@@ -502,10 +502,12 @@ static void gui_task(void *arg)
                     lv_obj_set_size(ring_dots[last_sec], 4, 4);
                     lv_obj_set_style_bg_color(ring_dots[last_sec], lv_color_make(38, 38, 38), 0);
                     
-                    // 重新微调坐标，补偿 4x4 居中偏移 (从-3 offset变回-2 offset，向右下移动1像素)
+                    // 重新微调坐标，补偿 4x4 居中偏移 (圆心位置补偿 225 半径)
                     int lx = lv_obj_get_x(ring_dots[last_sec]);
                     int ly = lv_obj_get_y(ring_dots[last_sec]);
                     lv_obj_set_pos(ring_dots[last_sec], lx + 1, ly + 1);
+                    
+                    last_sec = -1; // 恢复后立即置为无效值，防止异常情况下重复微调漂移
                 }
                 
                 if (sec < RING_DOTS) {
