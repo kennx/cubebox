@@ -23,7 +23,7 @@ LV_FONT_DECLARE(lv_font_montserrat_48);
 #define RING_DOTS     60
 
 // 5x7 点阵字模: 0-9 以及 冒号(:)
-static const uint8_t font_5x7[11][7] __attribute__((unused)) = {
+static const uint8_t font_5x7[11][7] = {
     {0x0E, 0x11, 0x11, 0x11, 0x11, 0x11, 0x0E}, // 0: 01110
     {0x04, 0x0C, 0x04, 0x04, 0x04, 0x04, 0x0E}, // 1: 00100
     {0x0E, 0x11, 0x01, 0x02, 0x04, 0x08, 0x1F}, // 2
@@ -462,10 +462,64 @@ static void gui_task(void *arg)
         /* Update RTC time every 1000ms */
         if (now - last_rtc_update >= 1000 || last_rtc_update == 0) {
             if (rtc_pcf85063_get_time(&hour, &min, &sec) == ESP_OK) {
-                char buf[32];
+                char buf[16];
                 snprintf(buf, sizeof(buf), "%02d:%02d:%02d", hour, min, sec);
-                // lv_label_set_text(time_label, buf);
                 ESP_LOGI(TAG, "Updated display: %s", buf);
+                
+                /* 1. 刷新 8 个点阵字符 */
+                for (int c = 0; c < 8; c++) {
+                    char ch = buf[c];
+                    int font_idx = 0;
+                    if (ch >= '0' && ch <= '9') {
+                        font_idx = ch - '0';
+                    } else if (ch == ':') {
+                        font_idx = 10;
+                    } else {
+                        continue;
+                    }
+                    
+                    /* 读取该字模，并将对应的点亮起或熄灭 */
+                    for (int x = 0; x < 5; x++) {
+                        for (int y = 0; y < 7; y++) {
+                            // 取出第 y 行的第 4-x 位（左起第一列是 bit 4）
+                            bool is_lit = (font_5x7[font_idx][y] >> (4 - x)) & 1;
+                            lv_obj_t *dot = dot_objs[c][x][y];
+                            if (is_lit) {
+                                lv_obj_set_style_bg_color(dot, lv_color_make(229, 229, 229), 0); // 浅浅冷灰 `#E5E5E5`
+                            } else {
+                                lv_obj_set_style_bg_color(dot, lv_color_make(26, 26, 26), 0);    // 暗底灰 `#1A1A1A`
+                            }
+                        }
+                    }
+                }
+                
+                /* 2. 刷新秒环红点秒针 */
+                static int last_sec = -1;
+                if (last_sec != -1 && last_sec < RING_DOTS) {
+                    // 恢复上一次秒点为普通暗灰圆环色，尺寸 4x4
+                    lv_obj_set_size(ring_dots[last_sec], 4, 4);
+                    lv_obj_set_style_bg_color(ring_dots[last_sec], lv_color_make(38, 38, 38), 0);
+                    
+                    // 重新微调坐标，补偿 4x4 居中偏移 (圆心位置补偿 225 半径)
+                    float last_theta = (last_sec * 6.0f - 90.0f) * (float)M_PI / 180.0f;
+                    int lx = (int)((LCD_WIDTH / 2.0f) + RING_RADIUS * cosf(last_theta)) - 2;
+                    int ly = (int)((LCD_HEIGHT / 2.0f) + RING_RADIUS * sinf(last_theta)) - 2;
+                    lv_obj_set_pos(ring_dots[last_sec], lx, ly);
+                }
+                
+                if (sec < RING_DOTS) {
+                    // 将当前秒点设为 Nothing 标志性红点，尺寸变大为 6x6
+                    lv_obj_set_size(ring_dots[sec], 6, 6);
+                    lv_obj_set_style_bg_color(ring_dots[sec], lv_color_make(255, 0, 64), 0); // 亮红 `#FF0040`
+                    
+                    // 重新微调坐标，补偿 6x6 居中偏移
+                    float curr_theta = (sec * 6.0f - 90.0f) * (float)M_PI / 180.0f;
+                    int cx = (int)((LCD_WIDTH / 2.0f) + RING_RADIUS * cosf(curr_theta)) - 3;
+                    int cy = (int)((LCD_HEIGHT / 2.0f) + RING_RADIUS * sinf(curr_theta)) - 3;
+                    lv_obj_set_pos(ring_dots[sec], cx, cy);
+                    
+                    last_sec = sec;
+                }
             } else {
                 ESP_LOGE(TAG, "Failed to read RTC for display update");
             }
