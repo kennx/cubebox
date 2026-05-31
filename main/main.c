@@ -13,14 +13,11 @@
 #include "lvgl.h"
 #include "esp_timer.h"
 #include <math.h>
+#include <driver/gpio.h>
 
 LV_FONT_DECLARE(lv_font_montserrat_48);
 
-#define DOT_SIZE      6
-#define DOT_GAP       2
-#define CHAR_GAP      10
-#define RING_RADIUS   225
-#define RING_DOTS     60
+
 
 // 5x7 点阵字模: 0-9 以及 冒号(:)
 static const uint8_t font_5x7[11][7] = {
@@ -59,6 +56,7 @@ static const uint8_t font_5x7[11][7] = {
 
 /* AXP2101 registers */
 #define AXP2101_LDO_ONOFF_CTRL0     0x90
+#define AXP2101_LDO_ONOFF_CTRL1     0x91
 #define AXP2101_DC_ONOFF_DVM_CTRL   0x80
 #define AXP2101_DC_VOL0_CTRL        0x82
 #define AXP2101_LDO_VOL0_CTRL       0x92
@@ -75,7 +73,6 @@ static esp_lcd_panel_handle_t lcd_panel = NULL;
 /* LCD init commands - must be global/static for SH8601 driver */
 static const uint8_t lcd_data_00[] = {0x00};
 static const uint8_t lcd_data_20[] = {0x20};
-static const uint8_t lcd_data_2C[] = {0x2C};
 static const uint8_t lcd_data_10[] = {0x10};
 static const uint8_t lcd_data_A0[] = {0xA0};
 static const uint8_t lcd_data_80[] = {0x80};
@@ -95,7 +92,7 @@ static const sh8601_lcd_init_cmd_t lcd_init_cmds[] = {
     {0x3A, lcd_data_55, 1, 0},
     {0x35, lcd_data_00, 1, 0},
     {0x36, lcd_data_30, 1, 0},
-    {0x53, lcd_data_2C, 1, 0},
+    {0x53, lcd_data_20, 1, 0},
     {0x51, lcd_data_FF, 1, 0},
     {0x63, lcd_data_FF, 1, 0},
     {0x2A, lcd_data_2A, 4, 0},
@@ -132,6 +129,17 @@ static void axp2101_clr_bit(uint8_t reg, uint8_t bit)
     }
 }
 
+static char current_time_str[16] = "00:00:00";
+
+static esp_err_t rtc_pcf85063_write_reg(uint8_t reg, uint8_t val)
+{
+    if (pcf85063_dev == NULL) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    uint8_t buf[2] = {reg, val};
+    return i2c_master_transmit(pcf85063_dev, buf, 2, pdMS_TO_TICKS(1000));
+}
+
 static inline uint8_t bcd2dec(uint8_t val)
 {
     return ((val >> 4) * 10) + (val & 0x0F);
@@ -146,6 +154,10 @@ static void rtc_pcf85063_init(void)
     };
     ESP_ERROR_CHECK(i2c_master_bus_add_device(i2c_bus, &dev_cfg, &pcf85063_dev));
     ESP_LOGI(TAG, "PCF85063 RTC device added to I2C bus");
+
+    /* Force 24H mode by clearing bit 2 in Control_1 (0x00) */
+    ESP_ERROR_CHECK(rtc_pcf85063_write_reg(0x00, 0x00));
+    ESP_LOGI(TAG, "PCF85063 RTC forced to 24H mode");
 }
 
 static esp_err_t rtc_pcf85063_get_time(uint8_t *hour, uint8_t *minute, uint8_t *second)
@@ -198,12 +210,18 @@ static void pmic_init(void)
     ESP_ERROR_CHECK(axp2101_write_reg(AXP2101_LDO_VOL2_CTRL, 28));
     ESP_ERROR_CHECK(axp2101_write_reg(AXP2101_LDO_VOL3_CTRL, 28));
 
-    /* Enable DC1 (bit 0) and ALDO1,2,4 (bit 0,1,3). Do NOT enable ALDO3 here - LCD init controls it */
+    /* Enable DC1 (bit 0) and ALDO1/2/4 (bits 0/1/3). ALDO3 is toggled by LCD reset. */
     axp2101_set_bit(AXP2101_DC_ONOFF_DVM_CTRL, 0);
     uint8_t ldo_onoff;
-    axp2101_read_reg(AXP2101_LDO_ONOFF_CTRL0, &ldo_onoff);
-    ldo_onoff |= 0x0B;  /* bits 0,1,3 = ALDO1, ALDO2, ALDO4 */
-    axp2101_write_reg(AXP2101_LDO_ONOFF_CTRL0, ldo_onoff);
+    ESP_ERROR_CHECK(axp2101_read_reg(AXP2101_LDO_ONOFF_CTRL0, &ldo_onoff));
+    ldo_onoff |= 0x0B;
+    ldo_onoff &= ~0xB4;
+    ESP_ERROR_CHECK(axp2101_write_reg(AXP2101_LDO_ONOFF_CTRL0, ldo_onoff));
+
+    uint8_t ldo_onoff1;
+    ESP_ERROR_CHECK(axp2101_read_reg(AXP2101_LDO_ONOFF_CTRL1, &ldo_onoff1));
+    ldo_onoff1 &= ~0x03;
+    ESP_ERROR_CHECK(axp2101_write_reg(AXP2101_LDO_ONOFF_CTRL1, ldo_onoff1));
 
     /* Verify registers */
     uint8_t dc_onoff, dc_vol, ldo_vol0, ldo_vol3;
@@ -212,8 +230,9 @@ static void pmic_init(void)
     axp2101_read_reg(AXP2101_LDO_VOL0_CTRL, &ldo_vol0);
     axp2101_read_reg(AXP2101_LDO_VOL3_CTRL, &ldo_vol3);
     axp2101_read_reg(AXP2101_LDO_ONOFF_CTRL0, &ldo_onoff);
-    ESP_LOGI(TAG, "PMIC verify: DC_ONOFF=0x%02X DC_VOL=0x%02X LDO0_VOL=0x%02X LDO3_VOL=0x%02X LDO_ONOFF=0x%02X",
-             dc_onoff, dc_vol, ldo_vol0, ldo_vol3, ldo_onoff);
+    axp2101_read_reg(AXP2101_LDO_ONOFF_CTRL1, &ldo_onoff1);
+    ESP_LOGI(TAG, "PMIC verify: DC_ONOFF=0x%02X DC_VOL=0x%02X LDO0_VOL=0x%02X LDO3_VOL=0x%02X LDO_ONOFF=0x%02X LDO_ONOFF1=0x%02X",
+             dc_onoff, dc_vol, ldo_vol0, ldo_vol3, ldo_onoff, ldo_onoff1);
 
     ESP_LOGI(TAG, "PMIC initialized");
 }
@@ -252,6 +271,23 @@ static void lcd_set_backlight(uint8_t brightness)
     ESP_LOGI(TAG, "Backlight command result: %s", esp_err_to_name(ret));
 }
 
+static void lcd_diagnostic_fill(uint16_t color)
+{
+    static uint16_t line_buf[LCD_WIDTH * 20];
+    for (size_t i = 0; i < LCD_WIDTH * 20; i++) {
+        line_buf[i] = color;
+    }
+
+    for (int y = 0; y < LCD_HEIGHT; y += 20) {
+        esp_err_t ret = esp_lcd_panel_draw_bitmap(lcd_panel, 0, y, LCD_WIDTH, y + 20, line_buf);
+        if (ret != ESP_OK) {
+            ESP_LOGE(TAG, "Diagnostic fill failed at y=%d: %s", y, esp_err_to_name(ret));
+            return;
+        }
+    }
+    ESP_LOGI(TAG, "Diagnostic fill color=0x%04X completed", color);
+}
+
 static bool notify_lvgl_flush_ready(esp_lcd_panel_io_handle_t panel_io, esp_lcd_panel_io_event_data_t *edata, void *user_ctx)
 {
     lv_disp_drv_t *disp_driver = (lv_disp_drv_t *)user_ctx;
@@ -262,6 +298,7 @@ static bool notify_lvgl_flush_ready(esp_lcd_panel_io_handle_t panel_io, esp_lcd_
 static void lvgl_flush_cb(lv_disp_drv_t *drv, const lv_area_t *area, lv_color_t *color_map)
 {
     esp_lcd_panel_handle_t panel_handle = (esp_lcd_panel_handle_t) drv->user_data;
+    static uint32_t flush_count = 0;
     int offsetx1 = area->x1;
     int offsetx2 = area->x2;
     int offsety1 = area->y1;
@@ -271,17 +308,78 @@ static void lvgl_flush_cb(lv_disp_drv_t *drv, const lv_area_t *area, lv_color_t 
     uint32_t height = offsety2 - offsety1 + 1;
     uint32_t size = width * height;
 
-    /* A static swap buffer to isolate the big-endian pixel stream from LVGL's own drawing buffer */
-    static lv_color_t swap_buf[LCD_WIDTH * 40];
-    if (size > LCD_WIDTH * 40) {
-        size = LCD_WIDTH * 40;
+    /* A static swap buffer with safe margin to isolate the big-endian pixel stream and prevent rounder-induced underflow */
+    static lv_color_t swap_buf[LCD_WIDTH * 60];
+    if (size > LCD_WIDTH * 60) {
+        ESP_LOGE("main", "Flush size too large: %lu, max: %d", size, LCD_WIDTH * 60);
+        lv_disp_flush_ready(drv);
+        return;
     }
 
-    for (uint32_t i = 0; i < size; i++) {
-        swap_buf[i].full = (color_map[i].full >> 8) | (color_map[i].full << 8);
+    for (uint32_t y = 0; y < height; y++) {
+        int global_y = offsety1 + y;
+        for (uint32_t x = 0; x < width; x++) {
+            int global_x = offsetx1 + x;
+            uint32_t i = y * width + x;
+
+            // 1. Grid structure: 8x8 pixels per grid, dot is 6x6 (2px spacing)
+            int lx = global_x % 8;
+            int ly = global_y % 8;
+            
+            if (lx >= 1 && lx <= 6 && ly >= 1 && ly <= 6) {
+                // 2. Map coordinates to grid positions
+                int grid_x = global_x / 8;
+                int grid_y = global_y / 8;
+                
+                bool is_lit = false;
+                
+                // Clock height: 7 grids, from row 26 to 32
+                if (grid_y >= 26 && grid_y <= 32) {
+                    // Clock width: 8 digits, 6 grids per block (5 dot font + 1 gap), starting from column 6
+                    if (grid_x >= 6 && grid_x < 53) {
+                        int char_idx = (grid_x - 6) / 6;
+                        int char_col = (grid_x - 6) % 6;
+                        
+                        if (char_col < 5) {
+                            char ch = current_time_str[char_idx];
+                            int font_idx = -1;
+                            if (ch >= '0' && ch <= '9') {
+                                font_idx = ch - '0';
+                            } else if (ch == ':') {
+                                font_idx = 10;
+                            }
+                            
+                            if (font_idx >= 0) {
+                                int font_row = grid_y - 26;
+                                is_lit = (font_5x7[font_idx][font_row] >> (4 - char_col)) & 1;
+                            }
+                        }
+                    }
+                }
+                
+                if (is_lit) {
+                    swap_buf[i] = lv_color_make(229, 229, 229); // Light Gray `#E5E5E5`
+                } else {
+                    swap_buf[i] = lv_color_black(); // Pure black background
+                }
+            } else {
+                swap_buf[i] = lv_color_black(); // Spacing is pure black
+            }
+        }
     }
 
-    esp_lcd_panel_draw_bitmap(panel_handle, offsetx1, offsety1, offsetx2 + 1, offsety2 + 1, swap_buf);
+    esp_err_t ret = esp_lcd_panel_draw_bitmap(panel_handle, offsetx1, offsety1, offsetx2 + 1, offsety2 + 1, swap_buf);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "LVGL flush failed area=(%d,%d)-(%d,%d): %s",
+                 offsetx1, offsety1, offsetx2, offsety2, esp_err_to_name(ret));
+        lv_disp_flush_ready(drv);
+        return;
+    }
+    flush_count++;
+    if (flush_count <= 5 || flush_count % 60 == 0) {
+        ESP_LOGI(TAG, "LVGL flush #%lu area=(%d,%d)-(%d,%d) size=%lu",
+                 flush_count, offsetx1, offsety1, offsetx2, offsety2, size);
+    }
 }
 
 static void lvgl_tick_task(void *arg)
@@ -318,15 +416,13 @@ static void lcd_init(void)
         .cs_gpio_num = LCD_CS_GPIO,
         .dc_gpio_num = -1,
         .spi_mode = 0,
-        .pclk_hz = 40 * 1000 * 1000,
-        .trans_queue_depth = 1,
+        .pclk_hz = 10 * 1000 * 1000,
+        .trans_queue_depth = 10,
         .lcd_cmd_bits = 32,
         .lcd_param_bits = 8,
         .flags = {
             .quad_mode = true,
         },
-        .on_color_trans_done = notify_lvgl_flush_ready,
-        .user_ctx = &disp_drv,
     };
     ESP_ERROR_CHECK(esp_lcd_new_panel_io_spi((esp_lcd_spi_bus_handle_t)LCD_SPI_HOST, &io_config, &lcd_io));
 
@@ -356,7 +452,13 @@ static void lcd_init(void)
     ESP_LOGI(TAG, "esp_lcd_panel_init result: %s", esp_err_to_name(ret));
     ESP_ERROR_CHECK(ret);
 
+    ESP_LOGI(TAG, "Turning LCD display on...");
+    ESP_ERROR_CHECK(esp_lcd_panel_disp_on_off(lcd_panel, true));
+
     lcd_set_backlight(100);
+    lcd_diagnostic_fill(0xFFFF);
+    vTaskDelay(pdMS_TO_TICKS(1000));
+    lcd_diagnostic_fill(0x0000);
 
     ESP_LOGI(TAG, "LCD initialized");
 
@@ -379,6 +481,11 @@ static void lcd_init(void)
     disp_drv.rounder_cb = lvgl_rounder_cb;
     lv_disp_drv_register(&disp_drv);
 
+    const esp_lcd_panel_io_callbacks_t cbs = {
+        .on_color_trans_done = notify_lvgl_flush_ready,
+    };
+    ESP_ERROR_CHECK(esp_lcd_panel_io_register_event_callbacks(lcd_io, &cbs, &disp_drv));
+
     /* Set up 2ms high-resolution timer for LVGL tick */
     const esp_timer_create_args_t lvgl_tick_timer_args = {
         .callback = &lvgl_tick_task,
@@ -393,67 +500,10 @@ static void lcd_init(void)
 
 static void gui_task(void *arg)
 {
-    static lv_obj_t *dot_objs[8][5][7];
-    static lv_obj_t *ring_dots[RING_DOTS];
     /* Set screen background to black */
     lv_obj_t *scr = lv_scr_act();
     lv_obj_set_style_bg_color(scr, lv_color_black(), 0);
     lv_obj_set_style_bg_opa(scr, LV_OPA_COVER, 0);
-
-    /* 创建点阵容器并使其水平居中 */
-    lv_obj_t *time_container = lv_obj_create(scr);
-    lv_obj_set_size(time_container, 374, 54);
-    /* 移除容器背景、边框、内边距，使其完全透明 */
-    lv_obj_set_style_bg_opa(time_container, LV_OPA_TRANSP, 0);
-    lv_obj_set_style_border_width(time_container, 0, 0);
-    lv_obj_set_style_pad_all(time_container, 0, 0);
-    lv_obj_align(time_container, LV_ALIGN_CENTER, 0, 0); // 完美居中
-    
-    /* 批量创建 8 个字符的点阵网格 */
-    for (int c = 0; c < 8; c++) {
-        lv_obj_t *char_container = lv_obj_create(time_container);
-        lv_obj_set_size(char_container, 38, 54);
-        lv_obj_set_style_bg_opa(char_container, LV_OPA_TRANSP, 0);
-        lv_obj_set_style_border_width(char_container, 0, 0);
-        lv_obj_set_style_pad_all(char_container, 0, 0);
-        /* 设置水平排列 X 轴偏移 */
-        lv_obj_set_pos(char_container, c * (38 + CHAR_GAP), 0);
-        
-        for (int x = 0; x < 5; x++) {
-            for (int y = 0; y < 7; y++) {
-                lv_obj_t *dot = lv_obj_create(char_container);
-                lv_obj_set_size(dot, DOT_SIZE, DOT_SIZE);
-                /* 设置像素点网格内相对坐标 */
-                lv_obj_set_pos(dot, x * (DOT_SIZE + DOT_GAP), y * (DOT_SIZE + DOT_GAP));
-                /* 样式使像素点为圆形，并默认亮起暗灰色 */
-                lv_obj_set_style_radius(dot, LV_RADIUS_CIRCLE, 0);
-                lv_obj_set_style_border_width(dot, 0, 0);
-                lv_obj_set_style_bg_color(dot, lv_color_make(26, 26, 26), 0); // 暗色底 `#1A1A1A`
-                lv_obj_set_style_bg_opa(dot, LV_OPA_COVER, 0);
-                
-                dot_objs[c][x][y] = dot;
-            }
-        }
-    }
-
-    /* 构建 60 秒极坐标圆形矩阵点阵 */
-    for (int i = 0; i < RING_DOTS; i++) {
-        /* 每一个点对应极坐标角度，以正上方为 0 秒 (theta = -90度) */
-        float theta = (i * 6.0f - 90.0f) * (float)M_PI / 180.0f;
-        int x_pos = (int)((LCD_WIDTH / 2.0f) + RING_RADIUS * cosf(theta)) - 2; // 圆点半径为2 (大小4像素)，做中心补偿
-        int y_pos = (int)((LCD_HEIGHT / 2.0f) + RING_RADIUS * sinf(theta)) - 2;
-        
-        lv_obj_t *ring_dot = lv_obj_create(scr);
-        lv_obj_set_size(ring_dot, 4, 4);
-        lv_obj_set_pos(ring_dot, x_pos, y_pos);
-        
-        lv_obj_set_style_radius(ring_dot, LV_RADIUS_CIRCLE, 0);
-        lv_obj_set_style_border_width(ring_dot, 0, 0);
-        lv_obj_set_style_bg_color(ring_dot, lv_color_make(38, 38, 38), 0); // 边缘秒环默认底色 `#262626`
-        lv_obj_set_style_bg_opa(ring_dot, LV_OPA_COVER, 0);
-        
-        ring_dots[i] = ring_dot;
-    }
 
     uint32_t last_rtc_update = 0;
     uint8_t hour = 0, min = 0, sec = 0;
@@ -464,64 +514,11 @@ static void gui_task(void *arg)
         /* Update RTC time every 1000ms */
         if (now - last_rtc_update >= 1000 || last_rtc_update == 0) {
             if (rtc_pcf85063_get_time(&hour, &min, &sec) == ESP_OK) {
-                char buf[16];
-                snprintf(buf, sizeof(buf), "%02d:%02d:%02d", hour, min, sec);
-                ESP_LOGI(TAG, "Updated display: %s", buf);
+                snprintf(current_time_str, sizeof(current_time_str), "%02d:%02d:%02d", hour, min, sec);
+                ESP_LOGI(TAG, "Updated display: %s", current_time_str);
                 
-                /* 1. 刷新 8 个点阵字符 */
-                for (int c = 0; c < 8; c++) {
-                    char ch = buf[c];
-                    int font_idx = 0;
-                    if (ch >= '0' && ch <= '9') {
-                        font_idx = ch - '0';
-                    } else if (ch == ':') {
-                        font_idx = 10;
-                    } else {
-                        continue;
-                    }
-                    
-                    /* 读取该字模，并将对应的点亮起或熄灭 */
-                    for (int x = 0; x < 5; x++) {
-                        for (int y = 0; y < 7; y++) {
-                            // 取出第 y 行的第 4-x 位（左起第一列是 bit 4）
-                            bool is_lit = (font_5x7[font_idx][y] >> (4 - x)) & 1;
-                            lv_obj_t *dot = dot_objs[c][x][y];
-                            if (is_lit) {
-                                lv_obj_set_style_bg_color(dot, lv_color_make(229, 229, 229), 0); // 浅浅冷灰 `#E5E5E5`
-                            } else {
-                                lv_obj_set_style_bg_color(dot, lv_color_make(26, 26, 26), 0);    // 暗底灰 `#1A1A1A`
-                            }
-                        }
-                    }
-                }
-                
-                /* 2. 刷新秒环红点秒针 */
-                static int last_sec = -1;
-                if (last_sec >= 0 && last_sec < RING_DOTS) {
-                    // 恢复上一次秒点为普通暗灰圆环色，尺寸 4x4
-                    lv_obj_set_size(ring_dots[last_sec], 4, 4);
-                    lv_obj_set_style_bg_color(ring_dots[last_sec], lv_color_make(38, 38, 38), 0);
-                    
-                    // 重新微调坐标，补偿 4x4 居中偏移 (圆心位置补偿 225 半径)
-                    int lx = lv_obj_get_x(ring_dots[last_sec]);
-                    int ly = lv_obj_get_y(ring_dots[last_sec]);
-                    lv_obj_set_pos(ring_dots[last_sec], lx + 1, ly + 1);
-                    
-                    last_sec = -1; // 恢复后立即置为无效值，防止异常情况下重复微调漂移
-                }
-                
-                if (sec < RING_DOTS) {
-                    // 将当前秒点设为 Nothing 标志性红点，尺寸变大为 6x6
-                    lv_obj_set_size(ring_dots[sec], 6, 6);
-                    lv_obj_set_style_bg_color(ring_dots[sec], lv_color_make(255, 0, 64), 0); // 亮红 `#FF0040`
-                    
-                    // 重新微调坐标，补偿 6x6 居中偏移 (从-2 offset放大为-3 offset，向左上移动1像素)
-                    int cx = lv_obj_get_x(ring_dots[sec]);
-                    int cy = lv_obj_get_y(ring_dots[sec]);
-                    lv_obj_set_pos(ring_dots[sec], cx - 1, cy - 1);
-                    
-                    last_sec = sec;
-                }
+                // Force full screen redraw in LVGL to flush using our global grid rendering
+                lv_obj_invalidate(lv_scr_act());
             } else {
                 ESP_LOGE(TAG, "Failed to read RTC for display update");
             }
@@ -535,6 +532,18 @@ static void gui_task(void *arg)
 
 void app_main(void)
 {
+    /* Pull up TF card CS (GPIO 6) to disable TF card and release the shared SPI/QSPI bus lines */
+    gpio_config_t tf_cs_cfg = {
+        .pin_bit_mask = 1ULL << 6,
+        .mode = GPIO_MODE_OUTPUT,
+        .pull_up_en = GPIO_PULLUP_ENABLE,
+        .pull_down_en = GPIO_PULLDOWN_DISABLE,
+        .intr_type = GPIO_INTR_DISABLE
+    };
+    gpio_config(&tf_cs_cfg);
+    gpio_set_level(6, 1);
+    ESP_LOGI("main", "TF Card CS (GPIO 6) pulled high to release shared SPI bus");
+
     pmic_init();
     rtc_pcf85063_init();  /* Initialize RTC */
     lcd_init();           /* Initialize LCD + LVGL */

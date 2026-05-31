@@ -27,7 +27,7 @@
 
 ## Environment Requirements
 
-- **ESP-IDF**：`v6.0.1`（项目指定版本）
+- **ESP-IDF**：`v5.5.1`（项目指定版本）
 - **目标芯片规格**：
   - **主控**：`esp32c6`（RISC-V 32-bit 单核，主频高达 160 MHz）
   - **无线**：Wi-Fi 6、蓝牙 5、IEEE 802.15.4 (Zigbee 3.0 / Thread)
