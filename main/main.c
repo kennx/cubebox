@@ -17,6 +17,9 @@
 
 LV_FONT_DECLARE(lv_font_montserrat_48);
 
+void statusbar_set_wifi_state(bool connected);
+void statusbar_set_ble_state(bool active);
+
 // 5x7 点阵字模: 0-9、冒号(:)、减号(-)、空格以及 13 个大写英文字母
 static const uint8_t font_5x7[39][7] = {
     {0x0E, 0x11, 0x11, 0x11, 0x11, 0x11, 0x0E}, // 0: 0
@@ -89,6 +92,7 @@ static const uint8_t font_5x7[39][7] = {
 #define AXP2101_LDO_VOL1_CTRL       0x93
 #define AXP2101_LDO_VOL2_CTRL       0x94
 #define AXP2101_LDO_VOL3_CTRL       0x95
+#define AXP2101_BAT_PERCENT_REG     0xA4
 
 static i2c_master_bus_handle_t i2c_bus = NULL;
 static i2c_master_dev_handle_t axp2101_dev = NULL;
@@ -153,6 +157,43 @@ static void axp2101_clr_bit(uint8_t reg, uint8_t bit)
         val &= ~(1 << bit);
         axp2101_write_reg(reg, val);
     }
+}
+
+/**
+ * @brief 获取当前电池电量百分比
+ * @param[out] pct 电池电量输出指针 (0-100)
+ * @return esp_err_t 
+ */
+static esp_err_t pmic_get_battery_pct(uint8_t *pct)
+{
+    if (pct == NULL) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    if (axp2101_dev == NULL) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    uint8_t val = 0;
+    esp_err_t ret = axp2101_read_reg(AXP2101_BAT_PERCENT_REG, &val);
+    if (ret == ESP_OK) {
+        if (val > 100) {
+            val = 100;
+        }
+        *pct = val;
+    }
+    return ret;
+}
+
+static bool s_wifi_connected = false;
+static bool s_ble_active = false;
+
+void statusbar_set_wifi_state(bool connected)
+{
+    s_wifi_connected = connected;
+}
+
+void statusbar_set_ble_state(bool active)
+{
+    s_ble_active = active;
 }
 
 static char current_time_str[16] = "00:00:00";
