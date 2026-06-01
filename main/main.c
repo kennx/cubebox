@@ -18,8 +18,8 @@
 LV_FONT_DECLARE(lv_font_montserrat_48);
 
 // 5x7 点阵字模: 0-9、冒号(:)、减号(-)、空格以及 13 个大写英文字母
-static const uint8_t font_5x7[26][7] = {
-    {0x0E, 0x11, 0x11, 0x11, 0x11, 0x11, 0x0E}, // 0: 00-09 数字
+static const uint8_t font_5x7[39][7] = {
+    {0x0E, 0x11, 0x11, 0x11, 0x11, 0x11, 0x0E}, // 0: 0
     {0x04, 0x0C, 0x04, 0x04, 0x04, 0x04, 0x0E}, // 1
     {0x0E, 0x11, 0x01, 0x02, 0x04, 0x08, 0x1F}, // 2
     {0x1F, 0x01, 0x02, 0x0E, 0x01, 0x11, 0x0E}, // 3
@@ -33,18 +33,31 @@ static const uint8_t font_5x7[26][7] = {
     {0x00, 0x00, 0x00, 0x1C, 0x00, 0x00, 0x00}, // 11: 减号 (-)
     {0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00}, // 12: 空格 ( )
     {0x0E, 0x11, 0x11, 0x1F, 0x11, 0x11, 0x11}, // 13: A
-    {0x1E, 0x11, 0x11, 0x11, 0x11, 0x11, 0x1E}, // 14: D
-    {0x1F, 0x10, 0x10, 0x1C, 0x10, 0x10, 0x1F}, // 15: E
-    {0x1F, 0x10, 0x10, 0x1C, 0x10, 0x10, 0x10}, // 16: F
-    {0x0E, 0x04, 0x04, 0x04, 0x04, 0x04, 0x0E}, // 17: I
-    {0x11, 0x1B, 0x15, 0x15, 0x11, 0x11, 0x11}, // 18: M
-    {0x11, 0x19, 0x15, 0x13, 0x11, 0x11, 0x11}, // 19: N
-    {0x0E, 0x11, 0x11, 0x11, 0x11, 0x11, 0x0E}, // 20: O
-    {0x1E, 0x11, 0x11, 0x1E, 0x14, 0x12, 0x11}, // 21: R
-    {0x0F, 0x10, 0x10, 0x0E, 0x01, 0x01, 0x1E}, // 22: S
-    {0x1F, 0x04, 0x04, 0x04, 0x04, 0x04, 0x04}, // 23: T
-    {0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x0E}, // 24: U
-    {0x11, 0x11, 0x15, 0x15, 0x1B, 0x11, 0x11}  // 25: W
+    {0x1E, 0x11, 0x11, 0x11, 0x11, 0x11, 0x1E}, // 14: B
+    {0x0E, 0x11, 0x10, 0x10, 0x10, 0x11, 0x0E}, // 15: C
+    {0x1E, 0x11, 0x11, 0x11, 0x11, 0x11, 0x1E}, // 16: D
+    {0x1F, 0x10, 0x10, 0x1C, 0x10, 0x10, 0x1F}, // 17: E
+    {0x1F, 0x10, 0x10, 0x1C, 0x10, 0x10, 0x10}, // 18: F
+    {0x0E, 0x11, 0x10, 0x17, 0x11, 0x11, 0x0F}, // 19: G
+    {0x11, 0x11, 0x11, 0x1F, 0x11, 0x11, 0x11}, // 20: H
+    {0x0E, 0x04, 0x04, 0x04, 0x04, 0x04, 0x0E}, // 21: I
+    {0x01, 0x01, 0x01, 0x01, 0x11, 0x11, 0x0E}, // 22: J
+    {0x11, 0x12, 0x14, 0x18, 0x14, 0x12, 0x11}, // 23: K
+    {0x10, 0x10, 0x10, 0x10, 0x10, 0x10, 0x1F}, // 24: L
+    {0x11, 0x1B, 0x15, 0x15, 0x11, 0x11, 0x11}, // 25: M
+    {0x11, 0x19, 0x15, 0x13, 0x11, 0x11, 0x11}, // 26: N
+    {0x0E, 0x11, 0x11, 0x11, 0x11, 0x11, 0x0E}, // 27: O
+    {0x1E, 0x11, 0x11, 0x1E, 0x10, 0x10, 0x10}, // 28: P
+    {0x0E, 0x11, 0x11, 0x11, 0x15, 0x12, 0x0D}, // 29: Q
+    {0x1E, 0x11, 0x11, 0x1E, 0x14, 0x12, 0x11}, // 30: R
+    {0x0F, 0x10, 0x10, 0x0E, 0x01, 0x01, 0x1E}, // 31: S
+    {0x1F, 0x04, 0x04, 0x04, 0x04, 0x04, 0x04}, // 32: T
+    {0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x0E}, // 33: U
+    {0x11, 0x11, 0x11, 0x11, 0x11, 0x0A, 0x04}, // 34: V
+    {0x11, 0x11, 0x15, 0x15, 0x1B, 0x11, 0x11}, // 35: W
+    {0x11, 0x11, 0x0A, 0x04, 0x0A, 0x11, 0x11}, // 36: X
+    {0x11, 0x11, 0x0A, 0x04, 0x04, 0x04, 0x04}, // 37: Y
+    {0x1F, 0x01, 0x02, 0x04, 0x08, 0x10, 0x1F}  // 38: Z
 };
 
 #define TAG "main"
@@ -152,22 +165,8 @@ static int char_to_font_idx(char ch)
     if (ch == '-') return 11;
     if (ch == ' ') return 12;
     if (ch >= 'a' && ch <= 'z') ch = ch - 'a' + 'A'; // 小写转大写
-    switch (ch) {
-        case 'A': return 13;
-        case 'D': return 14;
-        case 'E': return 15;
-        case 'F': return 16;
-        case 'I': return 17;
-        case 'M': return 18;
-        case 'N': return 19;
-        case 'O': return 20;
-        case 'R': return 21;
-        case 'S': return 22;
-        case 'T': return 23;
-        case 'U': return 24;
-        case 'W': return 25;
-        default:  return 12; // 默认空格
-    }
+    if (ch >= 'A' && ch <= 'Z') return 13 + (ch - 'A');
+    return 12; // 默认空格
 }
 
 static esp_err_t rtc_pcf85063_write_reg(uint8_t reg, uint8_t val)
@@ -200,7 +199,11 @@ static void rtc_pcf85063_init(void)
 }
 
 
-static const char *weekdays_str[7] = {"Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"};
+static const char *weekdays_str[7] = {"SUN", "MON", "TUE", "WED", "THU", "FRI", "SAT"};
+static const char *months_str[12] = {
+    "JAN", "FEB", "MAR", "APR", "MAY", "JUN", 
+    "JUL", "AUG", "SEP", "OCT", "NOV", "DEC"
+};
 
 static esp_err_t rtc_pcf85063_get_datetime(uint8_t *hour, uint8_t *minute, uint8_t *second,
                                            uint8_t *day, uint8_t *weekday, uint8_t *month, uint8_t *year)
@@ -342,18 +345,23 @@ static bool notify_lvgl_flush_ready(esp_lcd_panel_io_handle_t panel_io, esp_lcd_
     return false;
 }
 
-// 5x7 点阵时钟与日期（双行点阵）常量定义
-#define TIME_GRID_SIZE      9      // 时间网格 9x9px
-#define TIME_COLS           47     // 时间总列数 47
-#define TIME_ROWS           7      // 时间总行数 7
-#define TIME_OFFSET_X       28     // (480 - 423) / 2 = 28px
-#define TIME_OFFSET_Y       170    // 时间 Y 轴起始：170px
-
-#define DATE_GRID_SIZE      6      // 日期网格 6x6px
-#define DATE_COLS           59     // 日期总列数 59 ("MM-DD WWW" 共 10 字符)
+// 经典两端对齐双行纯点阵时钟与日期常量定义
+#define DATE_GRID_SIZE      5      // 日期网格 5x5px
+#define DATE_COLS           15     // 日期总字符数 15 ("MON JUN 01 2026")
 #define DATE_ROWS           7      // 日期总行数 7
-#define DATE_OFFSET_X       63     // (480 - 354) / 2 = 63px
-#define DATE_OFFSET_Y       258    // 日期 Y 轴起始：258px
+#define DATE_OFFSET_X       28     // 左偏移 28px
+#define DATE_OFFSET_Y       170    // 日期 Y 轴起始：170px
+
+#define TIME_GRID_SIZE      9      // 时间网格 9x9px
+#define TIME_COLS           47     // 时间总网格列数 47
+#define TIME_ROWS           7      // 时间总网格行数 7
+#define TIME_OFFSET_X       28     // 左偏移 28px
+#define TIME_OFFSET_Y       229    // 时间 Y 轴起始：229px
+
+// 15 个日期字符在 423px 水平框内的起始 X 轴局部坐标表（完美实现两端 423px 对齐）
+static const int date_char_x[15] = {
+    0, 29, 57, 85, 114, 142, 170, 199, 227, 255, 284, 312, 340, 369, 398
+};
 
 static void lvgl_flush_cb(lv_disp_drv_t *drv, const lv_area_t *area, lv_color_t *color_map)
 {
@@ -382,22 +390,56 @@ static void lvgl_flush_cb(lv_disp_drv_t *drv, const lv_area_t *area, lv_color_t 
             int global_x = offsetx1 + x;
             uint32_t i = y * width + x;
 
-            int tx = global_x - TIME_OFFSET_X;
-            int ty = global_y - TIME_OFFSET_Y;
-
             int dx = global_x - DATE_OFFSET_X;
             int dy = global_y - DATE_OFFSET_Y;
 
-            if (tx >= 0 && tx < TIME_COLS * TIME_GRID_SIZE &&
-                ty >= 0 && ty < TIME_ROWS * TIME_GRID_SIZE) {
+            int tx = global_x - TIME_OFFSET_X;
+            int ty = global_y - TIME_OFFSET_Y;
+
+            if (dx >= 0 && dx < 423 && dy >= 0 && dy < DATE_ROWS * DATE_GRID_SIZE) {
+                // 1. 渲染上方日期：MON JUN 01 2026 (网格 5px，圆点 4px，间距 1px)
+                int lx = dx % DATE_GRID_SIZE;
+                int ly = dy % DATE_GRID_SIZE;
+
+                if (lx < 4 && ly < 4) {
+                    bool is_lit = false;
+                    int char_idx = -1;
+                    
+                    // 查表确定落在 15 个字符的哪一个区间内
+                    for (int c = 0; c < 15; c++) {
+                        if (dx >= date_char_x[c] && dx < date_char_x[c] + 25) {
+                            char_idx = c;
+                            break;
+                        }
+                    }
+
+                    if (char_idx >= 0) {
+                        int char_x_offset = dx - date_char_x[char_idx];
+                        int char_col = char_x_offset / 5; // 0 到 4
+
+                        if (char_col < 5) {
+                            char ch = current_date_str[char_idx];
+                            int font_idx = char_to_font_idx(ch);
+                            if (font_idx >= 0) {
+                                int grid_y = dy / DATE_GRID_SIZE; // 0 到 6
+                                is_lit = (font_5x7[font_idx][grid_y] >> (4 - char_col)) & 1;
+                            }
+                        }
+                    }
+                    swap_buf[i] = is_lit ? lv_color_make(229, 229, 229) : lv_color_black();
+                } else {
+                    swap_buf[i] = color_map[i]; // 1px 细线间距透传
+                }
+            }
+            else if (tx >= 0 && tx < TIME_COLS * TIME_GRID_SIZE &&
+                     ty >= 0 && ty < TIME_ROWS * TIME_GRID_SIZE) {
                 
-                // 1. 渲染第一行：大点阵时间 (HH:MM:SS)
+                // 2. 渲染下方时间：HH:MM:SS (网格 9px，圆点 8px，间距 1px)
                 int grid_x = tx / TIME_GRID_SIZE;
                 int grid_y = ty / TIME_GRID_SIZE;
                 int lx = tx % TIME_GRID_SIZE;
                 int ly = ty % TIME_GRID_SIZE;
 
-                // 8x8 圆点，1px 缝隙间距 (lx < 8 且 ly < 8 时为圆点)
                 if (lx < 8 && ly < 8) {
                     bool is_lit = false;
                     int char_idx = grid_x / 6;
@@ -413,33 +455,6 @@ static void lvgl_flush_cb(lv_disp_drv_t *drv, const lv_area_t *area, lv_color_t 
                     swap_buf[i] = is_lit ? lv_color_make(229, 229, 229) : lv_color_black();
                 } else {
                     swap_buf[i] = color_map[i]; // 1px 细线间距透传
-                }
-            } 
-            else if (dx >= 0 && dx < DATE_COLS * DATE_GRID_SIZE &&
-                     dy >= 0 && dy < DATE_ROWS * DATE_GRID_SIZE) {
-                     
-                // 2. 渲染第二行：小点阵日期 (MM-DD WWW)
-                int grid_x = dx / DATE_GRID_SIZE;
-                int grid_y = dy / DATE_GRID_SIZE;
-                int lx = dx % DATE_GRID_SIZE;
-                int ly = dy % DATE_GRID_SIZE;
-
-                // 6x6 网格，4x4 圆点，2px 缝隙间距 (lx < 4 且 ly < 4 为圆点)
-                if (lx < 4 && ly < 4) {
-                    bool is_lit = false;
-                    int char_idx = grid_x / 6;
-                    int char_col = grid_x % 6;
-
-                    if (char_col < 5) {
-                        char ch = current_date_str[char_idx];
-                        int font_idx = char_to_font_idx(ch);
-                        if (font_idx >= 0) {
-                            is_lit = (font_5x7[font_idx][grid_y] >> (4 - char_col)) & 1;
-                        }
-                    }
-                    swap_buf[i] = is_lit ? lv_color_make(229, 229, 229) : lv_color_black();
-                } else {
-                    swap_buf[i] = color_map[i]; // 2px 细线间距透传
                 }
             } 
             else {
@@ -602,8 +617,8 @@ static void gui_task(void *arg)
                 if (year > 99) year = 26;
 
                 snprintf(current_time_str, sizeof(current_time_str), "%02d:%02d:%02d", hour, min, sec);
-                snprintf(current_date_str, sizeof(current_date_str), "%02d-%02d %s", 
-                         month, day, weekdays_str[weekday]);
+                snprintf(current_date_str, sizeof(current_date_str), "%s %s %02d 20%02d", 
+                         weekdays_str[weekday], months_str[month - 1], day, year);
                 
                 ESP_LOGI(TAG, "Updated display: %s | %s", current_date_str, current_time_str);
                 
