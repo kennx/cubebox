@@ -16,6 +16,7 @@
 #include <driver/gpio.h>
 
 LV_FONT_DECLARE(lv_font_montserrat_48);
+LV_FONT_DECLARE(lv_font_montserrat_12);
 
 
 
@@ -160,23 +161,35 @@ static void rtc_pcf85063_init(void)
     ESP_LOGI(TAG, "PCF85063 RTC forced to 24H mode");
 }
 
-static esp_err_t rtc_pcf85063_get_time(uint8_t *hour, uint8_t *minute, uint8_t *second)
+
+static const char *weekdays_str[7] = {"Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"};
+static const char *months_str[12] = {
+    "Jan", "Feb", "Mar", "Apr", "May", "Jun", 
+    "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"
+};
+
+static esp_err_t rtc_pcf85063_get_datetime(uint8_t *hour, uint8_t *minute, uint8_t *second,
+                                           uint8_t *day, uint8_t *weekday, uint8_t *month, uint8_t *year)
 {
     if (pcf85063_dev == NULL) {
         return ESP_ERR_INVALID_STATE;
     }
     uint8_t reg_addr = 0x04; /* Seconds register address */
-    uint8_t data[3] = {0};
+    uint8_t data[7] = {0};
     
-    /* Read 3 bytes starting from 0x04: Seconds, Minutes, Hours */
-    esp_err_t ret = i2c_master_transmit_receive(pcf85063_dev, &reg_addr, 1, data, 3, pdMS_TO_TICKS(1000));
+    /* Read 7 bytes starting from 0x04: Seconds, Minutes, Hours, Days, Weekdays, Months, Years */
+    esp_err_t ret = i2c_master_transmit_receive(pcf85063_dev, &reg_addr, 1, data, 7, pdMS_TO_TICKS(1000));
     if (ret != ESP_OK) {
         return ret;
     }
     
-    *second = bcd2dec(data[0] & 0x7F);
-    *minute = bcd2dec(data[1] & 0x7F);
-    *hour   = bcd2dec(data[2] & 0x3F); /* 24H mode max 23 */
+    *second  = bcd2dec(data[0] & 0x7F);
+    *minute  = bcd2dec(data[1] & 0x7F);
+    *hour    = bcd2dec(data[2] & 0x3F);
+    *day     = bcd2dec(data[3] & 0x3F);
+    *weekday = bcd2dec(data[4] & 0x07);
+    *month   = bcd2dec(data[5] & 0x1F);
+    *year    = bcd2dec(data[6]);
     
     return ESP_OK;
 }
@@ -367,10 +380,10 @@ static void lvgl_flush_cb(lv_disp_drv_t *drv, const lv_area_t *area, lv_color_t 
                         swap_buf[i] = lv_color_black(); // 灭灯纯黑
                     }
                 } else {
-                    swap_buf[i] = lv_color_black(); // 1px 细线纯黑间距
+                    swap_buf[i] = color_map[i]; // 1px 细线间距直接透传底层原始像素（通常背景为黑色）
                 }
             } else {
-                swap_buf[i] = lv_color_black(); // 时钟局限区外的区域为黑色
+                swap_buf[i] = color_map[i]; // 时钟局限区外的区域直接透传 LVGL 原始像素（以正常显示矢量英文日期）
             }
         }
     }
@@ -512,17 +525,37 @@ static void gui_task(void *arg)
     lv_obj_set_style_bg_color(scr, lv_color_black(), 0);
     lv_obj_set_style_bg_opa(scr, LV_OPA_COVER, 0);
 
+    // 创建精美的英文日期矢量 Label
+    lv_obj_t *date_label = lv_label_create(scr);
+    lv_obj_set_style_text_color(date_label, lv_color_make(229, 229, 229), 0);
+    lv_obj_set_style_text_font(date_label, &lv_font_montserrat_12, 0);
+    lv_obj_align(date_label, LV_ALIGN_CENTER, 0, -60); // 纵向往上偏移 60 像素，完美排在时间上方
+    lv_label_set_text(date_label, "Mon Jun 01 2026");
+
     uint32_t last_rtc_update = 0;
     uint8_t hour = 0, min = 0, sec = 0;
+    uint8_t day = 1, weekday = 1, month = 6, year = 26;
+    char date_str[32] = "Mon Jun 01 2026";
 
     while (1) {
         uint32_t now = xTaskGetTickCount() * portTICK_PERIOD_MS;
         
-        /* Update RTC time every 1000ms */
+        /* Update RTC time and date every 1000ms */
         if (now - last_rtc_update >= 1000 || last_rtc_update == 0) {
-            if (rtc_pcf85063_get_time(&hour, &min, &sec) == ESP_OK) {
+            if (rtc_pcf85063_get_datetime(&hour, &min, &sec, &day, &weekday, &month, &year) == ESP_OK) {
+                // 越界安全防护
+                if (weekday > 6) weekday = 1;
+                if (month < 1 || month > 12) month = 6;
+                if (day < 1 || day > 31) day = 1;
+                if (year > 99) year = 26;
+
                 snprintf(current_time_str, sizeof(current_time_str), "%02d:%02d:%02d", hour, min, sec);
-                ESP_LOGI(TAG, "Updated display: %s", current_time_str);
+                snprintf(date_str, sizeof(date_str), "%s %s %02d 20%02d", 
+                         weekdays_str[weekday], months_str[month - 1], day, year);
+                
+                lv_label_set_text(date_label, date_str);
+                
+                ESP_LOGI(TAG, "Updated display: %s | %s", date_str, current_time_str);
                 
                 // Force full screen redraw in LVGL to flush using our global grid rendering
                 lv_obj_invalidate(lv_scr_act());
