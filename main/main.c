@@ -295,6 +295,13 @@ static bool notify_lvgl_flush_ready(esp_lcd_panel_io_handle_t panel_io, esp_lcd_
     return false;
 }
 
+// 5x7 点阵时钟网格与尺寸常量定义
+#define GRID_SIZE     9      // 每个网格占 9x9 像素
+#define CLOCK_COLS    47     // 时钟总共占 47 列网格
+#define CLOCK_ROWS    7      // 时钟总共占 7 行网格
+#define OFFSET_X      28     // X 轴偏移：(480 - 47 * 9) / 2 = 28px
+#define OFFSET_Y      208    // Y 轴偏移：(480 - 7 * 9) / 2 = 208px
+
 static void lvgl_flush_cb(lv_disp_drv_t *drv, const lv_area_t *area, lv_color_t *color_map)
 {
     esp_lcd_panel_handle_t panel_handle = (esp_lcd_panel_handle_t) drv->user_data;
@@ -322,48 +329,48 @@ static void lvgl_flush_cb(lv_disp_drv_t *drv, const lv_area_t *area, lv_color_t 
             int global_x = offsetx1 + x;
             uint32_t i = y * width + x;
 
-            // 1. Grid structure: 8x8 pixels per grid, dot is 6x6 (2px spacing)
-            int lx = global_x % 8;
-            int ly = global_y % 8;
-            
-            if (lx >= 1 && lx <= 6 && ly >= 1 && ly <= 6) {
-                // 2. Map coordinates to grid positions
-                int grid_x = global_x / 8;
-                int grid_y = global_y / 8;
+            int local_x = global_x - OFFSET_X;
+            int local_y = global_y - OFFSET_Y;
+
+            if (local_x >= 0 && local_x < CLOCK_COLS * GRID_SIZE &&
+                local_y >= 0 && local_y < CLOCK_ROWS * GRID_SIZE) {
                 
-                bool is_lit = false;
-                
-                // Clock height: 7 grids, from row 26 to 32
-                if (grid_y >= 26 && grid_y <= 32) {
-                    // Clock width: 8 digits, 6 grids per block (5 dot font + 1 gap), starting from column 6
-                    if (grid_x >= 6 && grid_x < 53) {
-                        int char_idx = (grid_x - 6) / 6;
-                        int char_col = (grid_x - 6) % 6;
-                        
-                        if (char_col < 5) {
-                            char ch = current_time_str[char_idx];
-                            int font_idx = -1;
-                            if (ch >= '0' && ch <= '9') {
-                                font_idx = ch - '0';
-                            } else if (ch == ':') {
-                                font_idx = 10;
-                            }
-                            
-                            if (font_idx >= 0) {
-                                int font_row = grid_y - 26;
-                                is_lit = (font_5x7[font_idx][font_row] >> (4 - char_col)) & 1;
-                            }
+                int grid_x = local_x / GRID_SIZE;
+                int grid_y = local_y / GRID_SIZE;
+                int lx = local_x % GRID_SIZE;
+                int ly = local_y % GRID_SIZE;
+
+                // 方案 B：8x8 圆点，1px 缝隙间距 (lx < 8 且 ly < 8 时为圆点)
+                if (lx < 8 && ly < 8) {
+                    bool is_lit = false;
+                    int char_idx = grid_x / 6;
+                    int char_col = grid_x % 6;
+
+                    if (char_col < 5) {
+                        char ch = current_time_str[char_idx];
+                        int font_idx = -1;
+                        if (ch >= '0' && ch <= '9') {
+                            font_idx = ch - '0';
+                        } else if (ch == ':') {
+                            font_idx = 10;
+                        }
+
+                        if (font_idx >= 0) {
+                            int font_row = grid_y;
+                            is_lit = (font_5x7[font_idx][font_row] >> (4 - char_col)) & 1;
                         }
                     }
-                }
-                
-                if (is_lit) {
-                    swap_buf[i] = lv_color_make(229, 229, 229); // Light Gray `#E5E5E5`
+
+                    if (is_lit) {
+                        swap_buf[i] = lv_color_make(229, 229, 229); // 发光淡灰 `#E5E5E5`
+                    } else {
+                        swap_buf[i] = lv_color_black(); // 灭灯纯黑
+                    }
                 } else {
-                    swap_buf[i] = lv_color_black(); // Pure black background
+                    swap_buf[i] = lv_color_black(); // 1px 细线纯黑间距
                 }
             } else {
-                swap_buf[i] = lv_color_black(); // Spacing is pure black
+                swap_buf[i] = lv_color_black(); // 时钟局限区外的区域为黑色
             }
         }
     }
