@@ -16,14 +16,11 @@
 #include <driver/gpio.h>
 
 LV_FONT_DECLARE(lv_font_montserrat_48);
-LV_FONT_DECLARE(lv_font_montserrat_12);
 
-
-
-// 5x7 点阵字模: 0-9 以及 冒号(:)
-static const uint8_t font_5x7[11][7] = {
-    {0x0E, 0x11, 0x11, 0x11, 0x11, 0x11, 0x0E}, // 0: 01110
-    {0x04, 0x0C, 0x04, 0x04, 0x04, 0x04, 0x0E}, // 1: 00100
+// 5x7 点阵字模: 0-9、冒号(:)、减号(-)、空格以及 13 个大写英文字母
+static const uint8_t font_5x7[26][7] = {
+    {0x0E, 0x11, 0x11, 0x11, 0x11, 0x11, 0x0E}, // 0: 00-09 数字
+    {0x04, 0x0C, 0x04, 0x04, 0x04, 0x04, 0x0E}, // 1
     {0x0E, 0x11, 0x01, 0x02, 0x04, 0x08, 0x1F}, // 2
     {0x1F, 0x01, 0x02, 0x0E, 0x01, 0x11, 0x0E}, // 3
     {0x02, 0x06, 0x0A, 0x12, 0x1F, 0x02, 0x02}, // 4
@@ -32,7 +29,22 @@ static const uint8_t font_5x7[11][7] = {
     {0x1F, 0x01, 0x02, 0x04, 0x08, 0x08, 0x08}, // 7
     {0x0E, 0x11, 0x11, 0x0E, 0x11, 0x11, 0x0E}, // 8
     {0x0E, 0x11, 0x11, 0x0F, 0x01, 0x11, 0x0E}, // 9
-    {0x00, 0x04, 0x00, 0x00, 0x00, 0x04, 0x00}  // : (冒号)
+    {0x00, 0x04, 0x00, 0x00, 0x00, 0x04, 0x00}, // 10: 冒号 (:)
+    {0x00, 0x00, 0x00, 0x1C, 0x00, 0x00, 0x00}, // 11: 减号 (-)
+    {0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00}, // 12: 空格 ( )
+    {0x0E, 0x11, 0x11, 0x1F, 0x11, 0x11, 0x11}, // 13: A
+    {0x1E, 0x11, 0x11, 0x11, 0x11, 0x11, 0x1E}, // 14: D
+    {0x1F, 0x10, 0x10, 0x1C, 0x10, 0x10, 0x1F}, // 15: E
+    {0x1F, 0x10, 0x10, 0x1C, 0x10, 0x10, 0x10}, // 16: F
+    {0x0E, 0x04, 0x04, 0x04, 0x04, 0x04, 0x0E}, // 17: I
+    {0x11, 0x1B, 0x15, 0x15, 0x11, 0x11, 0x11}, // 18: M
+    {0x11, 0x19, 0x15, 0x13, 0x11, 0x11, 0x11}, // 19: N
+    {0x0E, 0x11, 0x11, 0x11, 0x11, 0x11, 0x0E}, // 20: O
+    {0x1E, 0x11, 0x11, 0x1E, 0x14, 0x12, 0x11}, // 21: R
+    {0x0F, 0x10, 0x10, 0x0E, 0x01, 0x01, 0x1E}, // 22: S
+    {0x1F, 0x04, 0x04, 0x04, 0x04, 0x04, 0x04}, // 23: T
+    {0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x0E}, // 24: U
+    {0x11, 0x11, 0x15, 0x15, 0x1B, 0x11, 0x11}  // 25: W
 };
 
 #define TAG "main"
@@ -131,6 +143,32 @@ static void axp2101_clr_bit(uint8_t reg, uint8_t bit)
 }
 
 static char current_time_str[16] = "00:00:00";
+static char current_date_str[16] = "06-01 MON"; // 全局日期字符串
+
+static int char_to_font_idx(char ch)
+{
+    if (ch >= '0' && ch <= '9') return ch - '0';
+    if (ch == ':') return 10;
+    if (ch == '-') return 11;
+    if (ch == ' ') return 12;
+    if (ch >= 'a' && ch <= 'z') ch = ch - 'a' + 'A'; // 小写转大写
+    switch (ch) {
+        case 'A': return 13;
+        case 'D': return 14;
+        case 'E': return 15;
+        case 'F': return 16;
+        case 'I': return 17;
+        case 'M': return 18;
+        case 'N': return 19;
+        case 'O': return 20;
+        case 'R': return 21;
+        case 'S': return 22;
+        case 'T': return 23;
+        case 'U': return 24;
+        case 'W': return 25;
+        default:  return 12; // 默认空格
+    }
+}
 
 static esp_err_t rtc_pcf85063_write_reg(uint8_t reg, uint8_t val)
 {
@@ -163,10 +201,6 @@ static void rtc_pcf85063_init(void)
 
 
 static const char *weekdays_str[7] = {"Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"};
-static const char *months_str[12] = {
-    "Jan", "Feb", "Mar", "Apr", "May", "Jun", 
-    "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"
-};
 
 static esp_err_t rtc_pcf85063_get_datetime(uint8_t *hour, uint8_t *minute, uint8_t *second,
                                            uint8_t *day, uint8_t *weekday, uint8_t *month, uint8_t *year)
@@ -308,12 +342,18 @@ static bool notify_lvgl_flush_ready(esp_lcd_panel_io_handle_t panel_io, esp_lcd_
     return false;
 }
 
-// 5x7 点阵时钟网格与尺寸常量定义
-#define GRID_SIZE     9      // 每个网格占 9x9 像素
-#define CLOCK_COLS    47     // 时钟总共占 47 列网格
-#define CLOCK_ROWS    7      // 时钟总共占 7 行网格
-#define OFFSET_X      28     // X 轴偏移：(480 - 47 * 9) / 2 = 28px
-#define OFFSET_Y      208    // Y 轴偏移：(480 - 7 * 9) / 2 = 208px
+// 5x7 点阵时钟与日期（双行点阵）常量定义
+#define TIME_GRID_SIZE      9      // 时间网格 9x9px
+#define TIME_COLS           47     // 时间总列数 47
+#define TIME_ROWS           7      // 时间总行数 7
+#define TIME_OFFSET_X       28     // (480 - 423) / 2 = 28px
+#define TIME_OFFSET_Y       170    // 时间 Y 轴起始：170px
+
+#define DATE_GRID_SIZE      6      // 日期网格 6x6px
+#define DATE_COLS           59     // 日期总列数 59 ("MM-DD WWW" 共 10 字符)
+#define DATE_ROWS           7      // 日期总行数 7
+#define DATE_OFFSET_X       63     // (480 - 354) / 2 = 63px
+#define DATE_OFFSET_Y       258    // 日期 Y 轴起始：258px
 
 static void lvgl_flush_cb(lv_disp_drv_t *drv, const lv_area_t *area, lv_color_t *color_map)
 {
@@ -342,18 +382,22 @@ static void lvgl_flush_cb(lv_disp_drv_t *drv, const lv_area_t *area, lv_color_t 
             int global_x = offsetx1 + x;
             uint32_t i = y * width + x;
 
-            int local_x = global_x - OFFSET_X;
-            int local_y = global_y - OFFSET_Y;
+            int tx = global_x - TIME_OFFSET_X;
+            int ty = global_y - TIME_OFFSET_Y;
 
-            if (local_x >= 0 && local_x < CLOCK_COLS * GRID_SIZE &&
-                local_y >= 0 && local_y < CLOCK_ROWS * GRID_SIZE) {
+            int dx = global_x - DATE_OFFSET_X;
+            int dy = global_y - DATE_OFFSET_Y;
+
+            if (tx >= 0 && tx < TIME_COLS * TIME_GRID_SIZE &&
+                ty >= 0 && ty < TIME_ROWS * TIME_GRID_SIZE) {
                 
-                int grid_x = local_x / GRID_SIZE;
-                int grid_y = local_y / GRID_SIZE;
-                int lx = local_x % GRID_SIZE;
-                int ly = local_y % GRID_SIZE;
+                // 1. 渲染第一行：大点阵时间 (HH:MM:SS)
+                int grid_x = tx / TIME_GRID_SIZE;
+                int grid_y = ty / TIME_GRID_SIZE;
+                int lx = tx % TIME_GRID_SIZE;
+                int ly = ty % TIME_GRID_SIZE;
 
-                // 方案 B：8x8 圆点，1px 缝隙间距 (lx < 8 且 ly < 8 时为圆点)
+                // 8x8 圆点，1px 缝隙间距 (lx < 8 且 ly < 8 时为圆点)
                 if (lx < 8 && ly < 8) {
                     bool is_lit = false;
                     int char_idx = grid_x / 6;
@@ -361,29 +405,45 @@ static void lvgl_flush_cb(lv_disp_drv_t *drv, const lv_area_t *area, lv_color_t 
 
                     if (char_col < 5) {
                         char ch = current_time_str[char_idx];
-                        int font_idx = -1;
-                        if (ch >= '0' && ch <= '9') {
-                            font_idx = ch - '0';
-                        } else if (ch == ':') {
-                            font_idx = 10;
-                        }
-
+                        int font_idx = char_to_font_idx(ch);
                         if (font_idx >= 0) {
-                            int font_row = grid_y;
-                            is_lit = (font_5x7[font_idx][font_row] >> (4 - char_col)) & 1;
+                            is_lit = (font_5x7[font_idx][grid_y] >> (4 - char_col)) & 1;
                         }
                     }
-
-                    if (is_lit) {
-                        swap_buf[i] = lv_color_make(229, 229, 229); // 发光淡灰 `#E5E5E5`
-                    } else {
-                        swap_buf[i] = lv_color_black(); // 灭灯纯黑
-                    }
+                    swap_buf[i] = is_lit ? lv_color_make(229, 229, 229) : lv_color_black();
                 } else {
-                    swap_buf[i] = color_map[i]; // 1px 细线间距直接透传底层原始像素（通常背景为黑色）
+                    swap_buf[i] = color_map[i]; // 1px 细线间距透传
                 }
-            } else {
-                swap_buf[i] = color_map[i]; // 时钟局限区外的区域直接透传 LVGL 原始像素（以正常显示矢量英文日期）
+            } 
+            else if (dx >= 0 && dx < DATE_COLS * DATE_GRID_SIZE &&
+                     dy >= 0 && dy < DATE_ROWS * DATE_GRID_SIZE) {
+                     
+                // 2. 渲染第二行：小点阵日期 (MM-DD WWW)
+                int grid_x = dx / DATE_GRID_SIZE;
+                int grid_y = dy / DATE_GRID_SIZE;
+                int lx = dx % DATE_GRID_SIZE;
+                int ly = dy % DATE_GRID_SIZE;
+
+                // 6x6 网格，4x4 圆点，2px 缝隙间距 (lx < 4 且 ly < 4 为圆点)
+                if (lx < 4 && ly < 4) {
+                    bool is_lit = false;
+                    int char_idx = grid_x / 6;
+                    int char_col = grid_x % 6;
+
+                    if (char_col < 5) {
+                        char ch = current_date_str[char_idx];
+                        int font_idx = char_to_font_idx(ch);
+                        if (font_idx >= 0) {
+                            is_lit = (font_5x7[font_idx][grid_y] >> (4 - char_col)) & 1;
+                        }
+                    }
+                    swap_buf[i] = is_lit ? lv_color_make(229, 229, 229) : lv_color_black();
+                } else {
+                    swap_buf[i] = color_map[i]; // 2px 细线间距透传
+                }
+            } 
+            else {
+                swap_buf[i] = color_map[i]; // 区域外直接透传 LVGL 原始像素
             }
         }
     }
@@ -525,17 +585,9 @@ static void gui_task(void *arg)
     lv_obj_set_style_bg_color(scr, lv_color_black(), 0);
     lv_obj_set_style_bg_opa(scr, LV_OPA_COVER, 0);
 
-    // 创建精美的英文日期矢量 Label
-    lv_obj_t *date_label = lv_label_create(scr);
-    lv_obj_set_style_text_color(date_label, lv_color_make(229, 229, 229), 0);
-    lv_obj_set_style_text_font(date_label, &lv_font_montserrat_12, 0);
-    lv_obj_align(date_label, LV_ALIGN_CENTER, 0, -60); // 纵向往上偏移 60 像素，完美排在时间上方
-    lv_label_set_text(date_label, "Mon Jun 01 2026");
-
     uint32_t last_rtc_update = 0;
     uint8_t hour = 0, min = 0, sec = 0;
     uint8_t day = 1, weekday = 1, month = 6, year = 26;
-    char date_str[32] = "Mon Jun 01 2026";
 
     while (1) {
         uint32_t now = xTaskGetTickCount() * portTICK_PERIOD_MS;
@@ -550,12 +602,10 @@ static void gui_task(void *arg)
                 if (year > 99) year = 26;
 
                 snprintf(current_time_str, sizeof(current_time_str), "%02d:%02d:%02d", hour, min, sec);
-                snprintf(date_str, sizeof(date_str), "%s %s %02d 20%02d", 
-                         weekdays_str[weekday], months_str[month - 1], day, year);
+                snprintf(current_date_str, sizeof(current_date_str), "%02d-%02d %s", 
+                         month, day, weekdays_str[weekday]);
                 
-                lv_label_set_text(date_label, date_str);
-                
-                ESP_LOGI(TAG, "Updated display: %s | %s", date_str, current_time_str);
+                ESP_LOGI(TAG, "Updated display: %s | %s", current_date_str, current_time_str);
                 
                 // Force full screen redraw in LVGL to flush using our global grid rendering
                 lv_obj_invalidate(lv_scr_act());
