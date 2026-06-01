@@ -164,7 +164,7 @@ static void axp2101_clr_bit(uint8_t reg, uint8_t bit)
  * @param[out] pct 电池电量输出指针 (0-100)
  * @return esp_err_t 
  */
-static esp_err_t __attribute__((unused)) pmic_get_battery_pct(uint8_t *pct)
+static esp_err_t pmic_get_battery_pct(uint8_t *pct)
 {
     if (pct == NULL) {
         return ESP_ERR_INVALID_ARG;
@@ -186,6 +186,7 @@ static esp_err_t __attribute__((unused)) pmic_get_battery_pct(uint8_t *pct)
 static lv_obj_t *s_statusbar_area = NULL;
 static bool s_wifi_connected = false;
 static bool s_ble_active = false;
+static uint8_t s_battery_pct = 100;
 
 void statusbar_set_wifi_state(bool connected)
 {
@@ -400,8 +401,8 @@ static bool notify_lvgl_flush_ready(esp_lcd_panel_io_handle_t panel_io, esp_lcd_
 #define TIME_OFFSET_X       28     // 左偏移 28px
 #define TIME_OFFSET_Y       229    // 时间 Y 轴起始：229px
 
-static const uint8_t icon_wifi[7] __attribute__((unused)) = {0x3E, 0x41, 0x1C, 0x22, 0x08, 0x00, 0x08};
-static const uint8_t icon_bluetooth[7] __attribute__((unused)) = {0x10, 0x18, 0x54, 0x38, 0x54, 0x18, 0x10};
+static const uint8_t icon_wifi[7] = {0x3E, 0x41, 0x1C, 0x22, 0x08, 0x00, 0x08};
+static const uint8_t icon_bluetooth[7] = {0x10, 0x18, 0x54, 0x38, 0x54, 0x18, 0x10};
 
 // 15 个日期字符在 423px 水平框内的起始 X 轴局部坐标表（完美实现两端 423px 对齐）
 static const int date_char_x[15] = {
@@ -442,8 +443,6 @@ static void lvgl_flush_cb(lv_disp_drv_t *drv, const lv_area_t *area, lv_color_t 
             int ty = global_y - TIME_OFFSET_Y;
 
             if (global_y >= 35 && global_y <= 48 && global_x >= 120 && global_x <= 360) {
-                int sx = global_x - 120;
-                (void)sx;
                 int sy = global_y - 35;
                 int logical_y = sy / 2;
                 int fill_y = sy % 2;
@@ -492,16 +491,6 @@ static void lvgl_flush_cb(lv_disp_drv_t *drv, const lv_area_t *area, lv_color_t 
                         } else if (col == 5 && (logical_y == 1 || logical_y == 3 || logical_y == 5)) {
                             is_lit = true;
                         } else if (col >= 2 && col <= 5 && logical_y >= 2 && logical_y <= 4) {
-                            static uint8_t s_battery_pct = 100;
-                            static uint32_t s_last_battery_read = 0;
-                            uint32_t ticks_now = xTaskGetTickCount() * portTICK_PERIOD_MS;
-                            if (ticks_now - s_last_battery_read >= 5000 || s_last_battery_read == 0) {
-                                uint8_t pct = 0;
-                                if (pmic_get_battery_pct(&pct) == ESP_OK) {
-                                    s_battery_pct = pct;
-                                    s_last_battery_read = ticks_now;
-                                }
-                            }
                             if (s_battery_pct >= 80 && col >= 2) {
                                 is_lit = true;
                             } else if (s_battery_pct >= 60 && col >= 2 && col <= 4) {
@@ -751,6 +740,15 @@ static void gui_task(void *arg)
                 
                 ESP_LOGI(TAG, "Updated display: %s | %s", current_date_str, current_time_str);
                 
+                // Read battery percentage once per second asynchronously in gui_task
+                uint8_t pct = 100;
+                if (pmic_get_battery_pct(&pct) == ESP_OK) {
+                    s_battery_pct = pct;
+                }
+                if (s_statusbar_area != NULL) {
+                    lv_obj_invalidate(s_statusbar_area);
+                }
+
                 // Force full screen redraw in LVGL to flush using our global grid rendering
                 lv_obj_invalidate(lv_scr_act());
             } else {
