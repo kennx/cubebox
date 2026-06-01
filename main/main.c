@@ -441,7 +441,83 @@ static void lvgl_flush_cb(lv_disp_drv_t *drv, const lv_area_t *area, lv_color_t 
             int tx = global_x - TIME_OFFSET_X;
             int ty = global_y - TIME_OFFSET_Y;
 
-            if (dx >= 0 && dx < 423 && dy >= 0 && dy < DATE_ROWS * DATE_GRID_SIZE) {
+            if (global_y >= 35 && global_y <= 48 && global_x >= 120 && global_x <= 360) {
+                int sx = global_x - 120;
+                (void)sx;
+                int sy = global_y - 35;
+                int logical_y = sy / 2;
+                int fill_y = sy % 2;
+                bool is_lit = false;
+
+                // 3. Left Time rendering (HH:MM) [X: 120 ~ 172]
+                static const int char_x_starts[5] = {120, 131, 142, 153, 164};
+                for (int c = 0; c < 5; c++) {
+                    if (global_x >= char_x_starts[c] && global_x < char_x_starts[c] + 9) {
+                        int char_col = (global_x - char_x_starts[c]) / 2;
+                        int fill_x = (global_x - char_x_starts[c]) % 2;
+                        if (fill_x == 0 && fill_y == 0) {
+                            char ch = current_time_str[c];
+                            int font_idx = char_to_font_idx(ch);
+                            if (font_idx >= 0) {
+                                is_lit = (font_5x7[font_idx][logical_y] >> (4 - char_col)) & 1;
+                            }
+                        }
+                        break;
+                    }
+                }
+
+                // 4. Right Icons rendering [X: 314 ~ 360]
+                if (global_x >= 314 && global_x <= 327) {
+                    int col = (global_x - 314) / 2;
+                    int fill_x = (global_x - 314) % 2;
+                    if (s_ble_active && fill_x == 0 && fill_y == 0) {
+                        is_lit = (icon_bluetooth[logical_y] >> (6 - col)) & 1;
+                    }
+                }
+                else if (global_x >= 331 && global_x <= 344) {
+                    int col = (global_x - 331) / 2;
+                    int fill_x = (global_x - 331) % 2;
+                    if (s_wifi_connected && fill_x == 0 && fill_y == 0) {
+                        is_lit = (icon_wifi[logical_y] >> (6 - col)) & 1;
+                    }
+                }
+                else if (global_x >= 348 && global_x <= 361) {
+                    int col = (global_x - 348) / 2;
+                    int fill_x = (global_x - 348) % 2;
+                    if (fill_x == 0 && fill_y == 0) {
+                        if (col == 0 || col == 6) {
+                            is_lit = (col == 0) ? true : (logical_y == 1 || logical_y == 3 || logical_y == 5);
+                        } else if (logical_y == 0 || logical_y == 6) {
+                            is_lit = (col < 6);
+                        } else if (col == 5 && (logical_y == 1 || logical_y == 3 || logical_y == 5)) {
+                            is_lit = true;
+                        } else if (col >= 2 && col <= 5 && logical_y >= 2 && logical_y <= 4) {
+                            static uint8_t s_battery_pct = 100;
+                            static uint32_t s_last_battery_read = 0;
+                            uint32_t ticks_now = xTaskGetTickCount() * portTICK_PERIOD_MS;
+                            if (ticks_now - s_last_battery_read >= 5000 || s_last_battery_read == 0) {
+                                uint8_t pct = 0;
+                                if (pmic_get_battery_pct(&pct) == ESP_OK) {
+                                    s_battery_pct = pct;
+                                    s_last_battery_read = ticks_now;
+                                }
+                            }
+                            if (s_battery_pct >= 80 && col >= 2) {
+                                is_lit = true;
+                            } else if (s_battery_pct >= 60 && col >= 2 && col <= 4) {
+                                is_lit = true;
+                            } else if (s_battery_pct >= 40 && col >= 2 && col <= 3) {
+                                is_lit = true;
+                            } else if (s_battery_pct >= 15 && col == 2) {
+                                is_lit = true;
+                            }
+                        }
+                    }
+                }
+
+                swap_buf[i] = is_lit ? lv_color_white() : color_map[i];
+            }
+            else if (dx >= 0 && dx < 423 && dy >= 0 && dy < DATE_ROWS * DATE_GRID_SIZE) {
                 // 1. 渲染上方日期：MON JUN 01 2026 (网格 5px，圆点 4px，间距 1px)
                 int lx = dx % DATE_GRID_SIZE;
                 int ly = dy % DATE_GRID_SIZE;
