@@ -442,14 +442,14 @@ static void lvgl_flush_cb(lv_disp_drv_t *drv, const lv_area_t *area, lv_color_t 
             int tx = global_x - TIME_OFFSET_X;
             int ty = global_y - TIME_OFFSET_Y;
 
-            if (global_y >= 50 && global_y <= 63 && global_x >= 95 && global_x <= 385) {
-                int sy = global_y - 50;
+            if (global_y >= 60 && global_y <= 73 && global_x >= 85 && global_x <= 395) {
+                int sy = global_y - 60;
                 int logical_y = sy / 2;
                 int fill_y = sy % 2;
                 bool is_lit = false;
 
-                // 3. Left Time rendering (HH:MM) [X: 95 ~ 147]
-                static const int char_x_starts[5] = {95, 106, 117, 128, 139};
+                // 3. Left Time rendering (HH:MM) [X: 85 ~ 137]
+                static const int char_x_starts[5] = {85, 96, 107, 118, 129};
                 for (int c = 0; c < 5; c++) {
                     if (global_x >= char_x_starts[c] && global_x < char_x_starts[c] + 9) {
                         int char_col = (global_x - char_x_starts[c]) / 2;
@@ -465,24 +465,24 @@ static void lvgl_flush_cb(lv_disp_drv_t *drv, const lv_area_t *area, lv_color_t 
                     }
                 }
 
-                // 4. Right Icons rendering [X: 339 ~ 385]
-                if (global_x >= 339 && global_x <= 351) {
-                    int col = (global_x - 339) / 2;
-                    int fill_x = (global_x - 339) % 2;
+                // 4. Right Icons rendering [X: 349 ~ 395]
+                if (global_x >= 349 && global_x <= 361) {
+                    int col = (global_x - 349) / 2;
+                    int fill_x = (global_x - 349) % 2;
                     if (s_ble_active && fill_x == 0 && fill_y == 0) {
                         is_lit = (icon_bluetooth[logical_y] >> (6 - col)) & 1;
                     }
                 }
-                else if (global_x >= 356 && global_x <= 368) {
-                    int col = (global_x - 356) / 2;
-                    int fill_x = (global_x - 356) % 2;
+                else if (global_x >= 366 && global_x <= 378) {
+                    int col = (global_x - 366) / 2;
+                    int fill_x = (global_x - 366) % 2;
                     if (s_wifi_connected && fill_x == 0 && fill_y == 0) {
                         is_lit = (icon_wifi[logical_y] >> (6 - col)) & 1;
                     }
                 }
-                else if (global_x >= 373 && global_x <= 385) {
-                    int col = (global_x - 373) / 2;
-                    int fill_x = (global_x - 373) % 2;
+                else if (global_x >= 383 && global_x <= 395) {
+                    int col = (global_x - 383) / 2;
+                    int fill_x = (global_x - 383) % 2;
                     if (fill_x == 0 && fill_y == 0) {
                         if (col == 0 || col == 6) {
                             is_lit = (col == 0) ? true : (logical_y == 1 || logical_y == 3 || logical_y == 5);
@@ -711,8 +711,8 @@ static void gui_task(void *arg)
     lv_obj_set_style_bg_opa(scr, LV_OPA_COVER, 0);
 
     s_statusbar_area = lv_obj_create(lv_scr_act());
-    lv_obj_set_size(s_statusbar_area, 291, 14);
-    lv_obj_set_pos(s_statusbar_area, 95, 50);
+    lv_obj_set_size(s_statusbar_area, 311, 14);
+    lv_obj_set_pos(s_statusbar_area, 85, 60);
     lv_obj_set_style_bg_opa(s_statusbar_area, LV_OPA_TRANSP, 0);
     lv_obj_set_style_border_width(s_statusbar_area, 0, 0);
     lv_obj_set_style_pad_all(s_statusbar_area, 0, 0);
