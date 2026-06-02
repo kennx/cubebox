@@ -96,6 +96,7 @@ idf.py set-target esp32c6
 - **LVGL 使用规范**：
   - 当前使用 LVGL v8.x。遵循其对象模型，优先使用 `lv_obj_set_style_xxx` 做样式控制。
   - 避免每帧全屏 `lv_obj_invalidate(lv_scr_act())`，改为仅标记变化区域。
+  - **例外**：`gui_task` 中的 `lv_obj_invalidate(lv_scr_act())` 是 `lvgl_flush_cb` 像素拦截架构的必要代价。LVGL 不知道手写点阵时钟和状态栏的像素覆盖，因此必须强制全屏 flush 以确保自定义像素被重新计算。这是已知功耗权衡，已通过每秒 1 次刷新将频率降到最低。
   - 显示刷新缓冲区大小由 `LCD_WIDTH * 40 * sizeof(lv_color_t)` 定义，修改时需确保 DMA 容量和总线带宽匹配。
 - **如果写了 200 行而 50 行就能解决，重写它。**
 
