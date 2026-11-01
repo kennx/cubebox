@@ -21,6 +21,11 @@ LV_FONT_DECLARE(lv_font_montserrat_48);
 
 #define TAG "main"
 
+/* 低功耗 idle：60s 无触摸进入，触摸唤醒（只恢复亮度，不启动任何无线电） */
+#define IDLE_TIMEOUT_MS    60000
+static bool s_low_power = false;
+static uint32_t s_low_power_enter_ms = 0;
+
 /* I2C */
 #define I2C_SDA_GPIO    8
 #define I2C_SCL_GPIO    7
@@ -103,6 +108,23 @@ static void gui_task(void *arg)
         if (now - last_rtc_update >= 1000 || last_rtc_update == 0) {
             ui_clock_tick_refresh();
             last_rtc_update = now;
+        }
+
+        /* 低功耗 idle 管理：每个循环检查（10ms 粒度，唤醒响应及时） */
+        uint32_t last_act = bsp_touch_last_activity_ms();
+        if (!s_low_power) {
+            if (now - last_act >= IDLE_TIMEOUT_MS) {
+                s_low_power = true;
+                s_low_power_enter_ms = now;
+                bsp_lcd_set_brightness_raw(BSP_LCD_BRIGHTNESS_LOW_PCT);
+                bsp_touch_set_swallow_once();
+                ESP_LOGI(TAG, "idle: enter low power (brightness %d%%)", BSP_LCD_BRIGHTNESS_LOW_PCT);
+            }
+        } else if ((int32_t)(last_act - s_low_power_enter_ms) > 0) {
+            /* 进入低功耗之后有触摸 → 唤醒，只恢复亮度（首次触摸已被吞掉防误触） */
+            s_low_power = false;
+            bsp_lcd_restore_user_brightness();
+            ESP_LOGI(TAG, "idle: wake, restore brightness %u%%", bsp_lcd_get_brightness_pct());
         }
 
         /* 页面导航请求（控制台/手势路径之外的远程触发） */
