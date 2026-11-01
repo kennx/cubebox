@@ -89,8 +89,6 @@ static void gui_task(void *arg)
     lv_obj_set_style_bg_color(scr, lv_color_black(), 0);
     lv_obj_set_style_bg_opa(scr, LV_OPA_COVER, 0);
 
-    ui_clock_init(scr);
-
     uint32_t last_rtc_update = 0;
 
     while (1) {

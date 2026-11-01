@@ -1,5 +1,6 @@
 #include <stdint.h>
 #include <stdio.h>
+#include <string.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
 #include <esp_log.h>
@@ -31,6 +32,18 @@
 
 static esp_lcd_panel_io_handle_t lcd_io = NULL;
 static esp_lcd_panel_handle_t lcd_panel = NULL;
+
+static bsp_lcd_flush_mode_t s_flush_mode = BSP_LCD_FLUSH_CLOCK_OVERLAY;
+
+void bsp_lcd_set_flush_mode(bsp_lcd_flush_mode_t mode)
+{
+    s_flush_mode = mode;
+}
+
+bsp_lcd_flush_mode_t bsp_lcd_get_flush_mode(void)
+{
+    return s_flush_mode;
+}
 
 /* 截图调试：请求标志任意任务置位，活动状态仅 gui_task 上下文访问 */
 static volatile bool s_snap_req = false;
@@ -136,8 +149,14 @@ static void lvgl_flush_cb(lv_disp_drv_t *drv, const lv_area_t *area, lv_color_t 
         return;
     }
 
-    /* 点阵时钟/状态栏像素叠绘：在送显前对 swap_buf 做逐像素覆盖 */
-    ui_clock_overlay_apply(area, color_map, swap_buf);
+    /* 点阵时钟像素叠绘：在送显前对 swap_buf 做逐像素覆盖（仅时钟页模式）；
+     * 设置页模式纯透传，但仍要经 swap_buf 隔离（draw_bitmap 异步读取期间
+     * LVGL 可能复用其绘制缓冲） */
+    if (s_flush_mode == BSP_LCD_FLUSH_CLOCK_OVERLAY) {
+        ui_clock_overlay_apply(area, color_map, swap_buf);
+    } else {
+        memcpy(swap_buf, color_map, size * sizeof(lv_color_t));
+    }
 
     /* 截图调试：逐行流出最终送显像素（RGB565 hex，内存字节序）。
      * 每行一条 "#SNAP x1 y x2 y" + 该行 hex（≤1952B 单次写，防溢出），

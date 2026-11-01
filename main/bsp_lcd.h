@@ -4,10 +4,24 @@
 #include <stdint.h>
 
 /**
+ * @brief flush 模式：时钟页叠绘点阵 / 设置页纯透传
+ */
+typedef enum {
+    BSP_LCD_FLUSH_CLOCK_OVERLAY,   /* 时钟页：叠绘日期/时间点阵 */
+    BSP_LCD_FLUSH_PASSTHROUGH,     /* 设置页等：LVGL 像素原样送显 */
+} bsp_lcd_flush_mode_t;
+
+/**
  * @brief 初始化 LCD（SPI/QSPI 总线 + SH8601 面板 + LVGL 显示驱动 + 2ms tick 定时器）
  * @note 内部调用 bsp_power_lcd_reset() 完成屏电源复位，需先 bsp_power_init()
  */
 void bsp_lcd_init(void);
+
+/**
+ * @brief 切换 flush 模式（页面导航时调用；动画开始前切，防过渡帧叠绘残留）
+ */
+void bsp_lcd_set_flush_mode(bsp_lcd_flush_mode_t mode);
+bsp_lcd_flush_mode_t bsp_lcd_get_flush_mode(void);
 
 /**
  * @brief 设置背光亮度（发送 SH8601 命令 0x51，无独立背光 GPIO）

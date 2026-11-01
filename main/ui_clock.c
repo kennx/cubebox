@@ -4,7 +4,6 @@
 #include "lvgl.h"
 #include "ui_clock.h"
 #include "bsp_rtc.h"
-#include "bsp_power.h"
 
 #define TAG "ui_clock"
 
@@ -51,36 +50,7 @@ static const uint8_t font_5x7[39][7] = {
     {0x1F, 0x01, 0x02, 0x04, 0x08, 0x10, 0x1F}  // 38: Z
 };
 
-/* 状态栏（Task 4 将整体移除） */
-static const uint8_t icon_wifi[7] = {0x3E, 0x41, 0x1C, 0x22, 0x08, 0x00, 0x08};
-static const uint8_t icon_bluetooth[7] = {0x10, 0x18, 0x54, 0x38, 0x54, 0x18, 0x10};
-
-/* Statusbar layout macros per design spec */
-#define STATUSBAR_Y_START       35
-#define STATUSBAR_Y_END         48
-#define STATUSBAR_X_START       120
-#define STATUSBAR_X_END         360
-#define STATUSBAR_WIDTH         240
-#define STATUSBAR_HEIGHT        14
-
-#define STATUSBAR_TIME_X        120
-#define STATUSBAR_TIME_CHAR_W   9
-#define STATUSBAR_ICON_BT_X     314
-#define STATUSBAR_ICON_WIFI_X   331
-#define STATUSBAR_ICON_BAT_X    348
-#define STATUSBAR_ICON_WIDTH    13  /* 7 logical cols * 2 - 1 */
-
-/* Battery icon: shell (fixed frame) OR'ed with cell level bitmap */
-static const uint8_t icon_battery_shell[7] = {
-    0x7E, 0x43, 0x42, 0x43, 0x42, 0x43, 0x7E
-};
-static const uint8_t icon_battery_cell[5][7] = {
-    {0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00}, // <15%
-    {0x00, 0x00, 0x10, 0x10, 0x10, 0x00, 0x00}, // >=15% (col 2)
-    {0x00, 0x00, 0x18, 0x18, 0x18, 0x00, 0x00}, // >=40% (col 2,3)
-    {0x00, 0x00, 0x1C, 0x1C, 0x1C, 0x00, 0x00}, // >=60% (col 2,3,4)
-    {0x00, 0x00, 0x1E, 0x1E, 0x1E, 0x00, 0x00}  // >=80% (col 2,3,4,5)
-};
+/* 顶部状态栏已按需求移除（WiFi 状态改在设置页显示） */
 
 // 经典两端对齐双行纯点阵时钟与日期常量定义
 #define DATE_GRID_SIZE      5      // 日期网格 5x5px
@@ -100,23 +70,8 @@ static const int date_char_x[15] = {
     0, 29, 57, 85, 114, 142, 170, 199, 227, 255, 284, 312, 340, 369, 398
 };
 
-static lv_obj_t *s_statusbar_area = NULL;
-static bool s_wifi_connected = false;
-static bool s_ble_active = false;
-static uint8_t s_battery_pct = 100;
-
 static char current_time_str[16] = "00:00:00";
 static char current_date_str[32] = "MON JUN 01 2026"; // 全局日期字符串，32B 留有余量
-
-void statusbar_set_wifi_state(bool connected)
-{
-    s_wifi_connected = connected;
-}
-
-void statusbar_set_ble_state(bool active)
-{
-    s_ble_active = active;
-}
 
 /**
  * @brief 字符到 font_5x7 点阵字模索引映射
@@ -131,17 +86,6 @@ static int char_to_font_idx(char ch)
     if (ch >= 'a' && ch <= 'z') ch = ch - 'a' + 'A'; // ASCII 小写转大写
     if (ch >= 'A' && ch <= 'Z') return 13 + (ch - 'A');
     return 12; // 默认空格
-}
-
-void ui_clock_init(lv_obj_t *scr)
-{
-    s_statusbar_area = lv_obj_create(scr);
-    lv_obj_set_size(s_statusbar_area, STATUSBAR_WIDTH, STATUSBAR_HEIGHT);
-    lv_obj_set_pos(s_statusbar_area, STATUSBAR_X_START, STATUSBAR_Y_START);
-    lv_obj_set_style_bg_opa(s_statusbar_area, LV_OPA_TRANSP, 0);
-    lv_obj_set_style_border_width(s_statusbar_area, 0, 0);
-    lv_obj_set_style_pad_all(s_statusbar_area, 0, 0);
-    lv_obj_add_flag(s_statusbar_area, LV_OBJ_FLAG_IGNORE_LAYOUT);
 }
 
 void ui_clock_tick_refresh(void)
@@ -162,12 +106,9 @@ void ui_clock_tick_refresh(void)
 
         ESP_LOGI(TAG, "Updated display: %s | %s", current_date_str, current_time_str);
 
-        /* Battery read: bsp_power_get_battery_pct handles fallback internally */
-        bsp_power_get_battery_pct(&s_battery_pct);
-
         /*
          * Full-screen invalidate is required because ui_clock_overlay_apply intercepts
-         * pixel rendering for the dot-matrix clock and statusbar. LVGL has no
+         * pixel rendering for the dot-matrix clock. LVGL has no
          * knowledge of these custom pixel overlays, so we must force a flush
          * across the entire screen to ensure the dot-matrix regions are redrawn.
          * On AMOLED this costs extra power; see AGENTS.md for the exception note.
@@ -197,67 +138,7 @@ void ui_clock_overlay_apply(const lv_area_t *area, const lv_color_t *src, lv_col
             int tx = global_x - TIME_OFFSET_X;
             int ty = global_y - TIME_OFFSET_Y;
 
-            if (global_y >= STATUSBAR_Y_START && global_y <= STATUSBAR_Y_END &&
-                global_x >= STATUSBAR_X_START && global_x <= STATUSBAR_X_END) {
-                int sy = global_y - STATUSBAR_Y_START;
-                int logical_y = sy / 2;
-                int fill_y = sy % 2;
-                bool is_lit = false;
-
-                // Left Time rendering (HH:MM)
-                static const int char_x_starts[5] = {
-                    STATUSBAR_TIME_X,
-                    STATUSBAR_TIME_X + 11,
-                    STATUSBAR_TIME_X + 22,
-                    STATUSBAR_TIME_X + 33,
-                    STATUSBAR_TIME_X + 44
-                };
-                for (int c = 0; c < 5; c++) {
-                    if (global_x >= char_x_starts[c] && global_x < char_x_starts[c] + STATUSBAR_TIME_CHAR_W) {
-                        int char_col = (global_x - char_x_starts[c]) / 2;
-                        int fill_x = (global_x - char_x_starts[c]) % 2;
-                        if (fill_x == 0 && fill_y == 0) {
-                            char ch = current_time_str[c];
-                            int font_idx = char_to_font_idx(ch);
-                            if (font_idx >= 0) {
-                                is_lit = (font_5x7[font_idx][logical_y] >> (4 - char_col)) & 1;
-                            }
-                        }
-                        break;
-                    }
-                }
-
-                // Right Icons rendering
-                if (global_x >= STATUSBAR_ICON_BT_X && global_x < STATUSBAR_ICON_BT_X + STATUSBAR_ICON_WIDTH) {
-                    int col = (global_x - STATUSBAR_ICON_BT_X) / 2;
-                    int fill_x = (global_x - STATUSBAR_ICON_BT_X) % 2;
-                    if (s_ble_active && fill_x == 0 && fill_y == 0) {
-                        is_lit = (icon_bluetooth[logical_y] >> (6 - col)) & 1;
-                    }
-                }
-                else if (global_x >= STATUSBAR_ICON_WIFI_X && global_x < STATUSBAR_ICON_WIFI_X + STATUSBAR_ICON_WIDTH) {
-                    int col = (global_x - STATUSBAR_ICON_WIFI_X) / 2;
-                    int fill_x = (global_x - STATUSBAR_ICON_WIFI_X) % 2;
-                    if (s_wifi_connected && fill_x == 0 && fill_y == 0) {
-                        is_lit = (icon_wifi[logical_y] >> (6 - col)) & 1;
-                    }
-                }
-                else if (global_x >= STATUSBAR_ICON_BAT_X && global_x < STATUSBAR_ICON_BAT_X + STATUSBAR_ICON_WIDTH) {
-                    int col = (global_x - STATUSBAR_ICON_BAT_X) / 2;
-                    int fill_x = (global_x - STATUSBAR_ICON_BAT_X) % 2;
-                    if (fill_x == 0 && fill_y == 0) {
-                        int level = (s_battery_pct >= 80) ? 4 :
-                                    (s_battery_pct >= 60) ? 3 :
-                                    (s_battery_pct >= 40) ? 2 :
-                                    (s_battery_pct >= 15) ? 1 : 0;
-                        uint8_t bitmap = icon_battery_shell[logical_y] | icon_battery_cell[level][logical_y];
-                        is_lit = (bitmap >> (6 - col)) & 1;
-                    }
-                }
-
-                dst[i] = is_lit ? lv_color_white() : src[i];
-            }
-            else if (dx >= 0 && dx < 423 && dy >= 0 && dy < DATE_ROWS * DATE_GRID_SIZE) {
+            if (dx >= 0 && dx < 423 && dy >= 0 && dy < DATE_ROWS * DATE_GRID_SIZE) {
                 // 1. 渲染上方日期：MON JUN 01 2026 (网格 5px，圆点 4px，间距 1px)
                 int lx = dx % DATE_GRID_SIZE;
                 int ly = dy % DATE_GRID_SIZE;
