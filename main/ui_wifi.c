@@ -26,9 +26,8 @@ static lv_obj_t *s_rows[20];
 static size_t s_row_count = 0;
 static lv_timer_t *s_poll_timer = NULL;
 
-/* 上次呈现的状态，避免每 200ms 重设文本 */
+/* 上次呈现的状态，避免每 200ms 重设文本；SCANNING→IDLE 转变触发列表重建 */
 static app_wifi_state_t s_last_state = APP_WIFI_STATE_IDLE;
-static size_t s_last_ap_count = 0;
 
 static void status_color_update(app_wifi_state_t st)
 {
@@ -184,9 +183,11 @@ static void poll_timer_cb(lv_timer_t *t)
         lv_label_set_text(s_status_label, st->status_text[0] ? st->status_text : " ");
         status_color_update(st->state);
     }
-    if (st->state == APP_WIFI_STATE_IDLE && st->ap_count != s_last_ap_count) {
-        s_last_ap_count = st->ap_count;
+    /* 扫描完成（SCANNING→IDLE）即重建列表：同数量重扫也要刷新
+     * （新网络、已存标记、RSSI），且首次扫描到 0 个网络时显示空态 */
+    if (st->state == APP_WIFI_STATE_IDLE && s_last_state == APP_WIFI_STATE_SCANNING) {
         rebuild_list();
+        ESP_LOGI(TAG, "list rebuilt (%d rows)", (int)st->ap_count);
     }
     s_last_state = st->state;
     (void)t;
@@ -255,7 +256,6 @@ void ui_wifi_create(void)
 
     s_poll_timer = lv_timer_create(poll_timer_cb, 200, NULL);
     (void)s_poll_timer;
-    (void)s_last_state;
 }
 
 void ui_wifi_show(void)

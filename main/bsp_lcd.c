@@ -40,7 +40,7 @@ static bsp_lcd_flush_mode_t s_flush_mode = BSP_LCD_FLUSH_CLOCK_OVERLAY;
 /* 用户亮度（NVS 持久化）；低功耗 dim 不修改该值 */
 static uint8_t s_brightness_pct = 100;
 
-void bsp_lcd_set_brightness_pct(uint8_t pct)
+void bsp_lcd_set_brightness_live(uint8_t pct)
 {
     if (pct < 10) {
         pct = 10;
@@ -50,6 +50,11 @@ void bsp_lcd_set_brightness_pct(uint8_t pct)
     }
     s_brightness_pct = pct;
     bsp_lcd_set_backlight(pct);
+}
+
+void bsp_lcd_set_brightness_pct(uint8_t pct)
+{
+    bsp_lcd_set_brightness_live(pct);
 
     nvs_handle_t nvs;
     if (nvs_open("settings", NVS_READWRITE, &nvs) == ESP_OK) {

@@ -48,10 +48,14 @@ static void touch_read_cb(lv_indev_drv_t *drv, lv_indev_data_t *data)
         }
     }
 
-    /* 低功耗唤醒：第一次 press 只唤醒不上报，防误触 */
-    if (pressed && s_swallow_once) {
-        s_swallow_once = false;
-        pressed = false;
+    /* 低功耗唤醒：整段按压都不上报（indev 30ms 周期采样，人手按压 ≥100ms，
+     * 只吞第一个采样挡不住误触），抬起后才恢复正常 */
+    if (s_swallow_once) {
+        if (pressed) {
+            pressed = false;
+        } else {
+            s_swallow_once = false;
+        }
     }
 
     if (pressed) {

@@ -30,10 +30,16 @@ bsp_lcd_flush_mode_t bsp_lcd_get_flush_mode(void);
 void bsp_lcd_set_backlight(uint8_t brightness);
 
 /**
- * @brief 用户亮度设置（设置页滑条）：写背光 + NVS 持久化
+ * @brief 用户亮度设置并持久化 NVS（滑条拖动结束时调用，避免拖动期间频繁写 flash）
  * @param pct 10-100（越界自动钳制）
  */
 void bsp_lcd_set_brightness_pct(uint8_t pct);
+
+/**
+ * @brief 用户亮度即时生效（滑条拖动中每帧调用）：只写背光不落 NVS
+ */
+void bsp_lcd_set_brightness_live(uint8_t pct);
+
 uint8_t bsp_lcd_get_brightness_pct(void);
 
 /**

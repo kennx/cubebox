@@ -80,11 +80,16 @@ static lv_obj_t *row_label_create(lv_obj_t *row, const char *text)
 
 static void brightness_slider_cb(lv_event_t *e)
 {
-    if (lv_event_get_code(e) == LV_EVENT_VALUE_CHANGED) {
+    lv_event_code_t code = lv_event_get_code(e);
+    if (code == LV_EVENT_VALUE_CHANGED) {
+        /* 拖动中只改背光与标签，不写 NVS（防 flash 磨损与 commit 卡顿） */
         lv_obj_t *slider = lv_event_get_target(e);
         uint8_t pct = (uint8_t)lv_slider_get_value(slider);
-        bsp_lcd_set_brightness_pct(pct);
+        bsp_lcd_set_brightness_live(pct);
         lv_label_set_text_fmt(s_bright_label, "%u%%", pct);
+    } else if (code == LV_EVENT_RELEASED) {
+        /* 松手才持久化 */
+        bsp_lcd_set_brightness_pct((uint8_t)lv_slider_get_value(lv_event_get_target(e)));
     }
 }
 
@@ -151,6 +156,7 @@ void ui_settings_create(void)
     lv_obj_set_style_bg_color(slider, lv_color_white(), LV_PART_INDICATOR);
     lv_obj_set_style_bg_color(slider, lv_color_white(), LV_PART_KNOB);
     lv_obj_add_event_cb(slider, brightness_slider_cb, LV_EVENT_VALUE_CHANGED, NULL);
+    lv_obj_add_event_cb(slider, brightness_slider_cb, LV_EVENT_RELEASED, NULL);
 
     /* 行 3：电量（百分比 + 分段电池图形，每 5s 刷新） */
     lv_obj_t *bat_row = row_create(s_settings_screen, 318);

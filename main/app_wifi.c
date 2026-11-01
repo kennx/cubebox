@@ -207,6 +207,10 @@ static esp_err_t ensure_wifi_stack(void)
         ESP_ERROR_CHECK(esp_netif_init());
         ESP_ERROR_CHECK(esp_event_loop_create_default());
         esp_netif_create_default_wifi_sta();
+        /* handler 挂在 default event loop（进程生命周期），只注册一次：
+         * 若放在 WiFi 栈分支，每次对时 teardown 后重建都会重复注册累积泄漏 */
+        ESP_ERROR_CHECK(esp_event_handler_instance_register(WIFI_EVENT, ESP_EVENT_ANY_ID, &wifi_event_handler, NULL, NULL));
+        ESP_ERROR_CHECK(esp_event_handler_instance_register(IP_EVENT, IP_EVENT_STA_GOT_IP, &wifi_event_handler, NULL, NULL));
         s_netif_ready = true;
     }
     if (s_wifi_up) {
@@ -217,9 +221,6 @@ static esp_err_t ensure_wifi_stack(void)
     if (ret != ESP_OK) {
         return ret;
     }
-    esp_event_handler_instance_t inst_wifi, inst_ip;
-    ESP_ERROR_CHECK(esp_event_handler_instance_register(WIFI_EVENT, ESP_EVENT_ANY_ID, &wifi_event_handler, NULL, &inst_wifi));
-    ESP_ERROR_CHECK(esp_event_handler_instance_register(IP_EVENT, IP_EVENT_STA_GOT_IP, &wifi_event_handler, NULL, &inst_ip));
     ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA));
     ESP_ERROR_CHECK(esp_wifi_start());
     /* 等 STA_START（5s）*/
@@ -298,11 +299,22 @@ static bool sntp_sync_and_set_rtc(void)
 
 /* ============ worker ============ */
 
-/* 认证类失败：密码错误，需删除失效凭据 */
+/* 认证类失败：密码错误/握手失败，需删除失效凭据。
+ * 覆盖 WPA2 与 WPA3/SAE 场景（手机热点改密码后旧凭据常见 203/204/205），
+ * 宁可误删重输一次密码也不让坏凭据锁死网络。 */
 static bool reason_is_auth_fail(int reason)
 {
-    return reason == WIFI_REASON_AUTH_FAIL ||
-           reason == WIFI_REASON_4WAY_HANDSHAKE_TIMEOUT;
+    switch (reason) {
+    case WIFI_REASON_AUTH_FAIL:              /* 202 */
+    case WIFI_REASON_ASSOC_FAIL:             /* 203 */
+    case WIFI_REASON_HANDSHAKE_TIMEOUT:      /* 204 */
+    case WIFI_REASON_CONNECTION_FAIL:        /* 205 */
+    case WIFI_REASON_4WAY_HANDSHAKE_TIMEOUT: /* 15 */
+    case WIFI_REASON_802_1X_AUTH_FAILED:     /* 23 */
+        return true;
+    default:
+        return false;
+    }
 }
 
 static void do_scan(void)
@@ -380,7 +392,10 @@ static void do_connect(const char *ssid, const char *pwd /* NULL=用凭据, ""=�
     }
 
     wifi_config_t sta_cfg = { 0 };
-    strlcpy((char *)sta_cfg.sta.ssid, ssid, sizeof(sta_cfg.sta.ssid));
+    /* SSID 字段 32 字节且不要求 NUL 终止：strlcpy 会把满长 32 字节 SSID
+     * 截成 31 字节导致 NO_AP_FOUND，必须按长度 memcpy（密码字段带 NUL 语义不受影响） */
+    size_t ssid_len = strnlen(ssid, sizeof(sta_cfg.sta.ssid));
+    memcpy(sta_cfg.sta.ssid, ssid, ssid_len);
     strlcpy((char *)sta_cfg.sta.password, effective_pwd, sizeof(sta_cfg.sta.password));
     sta_cfg.sta.threshold.authmode = WIFI_AUTH_WPA2_PSK;
     esp_err_t ret = esp_wifi_set_config(WIFI_IF_STA, &sta_cfg);
