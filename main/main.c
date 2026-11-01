@@ -16,6 +16,7 @@
 #include "bsp_touch.h"
 #include "ui_clock.h"
 #include "ui_settings.h"
+#include "app_wifi.h"
 
 LV_FONT_DECLARE(lv_font_montserrat_48);
 
@@ -84,6 +85,22 @@ static void time_sync_task(void *arg)
                 ui_nav_request(UI_NAV_SETTINGS);
             } else if (strcmp(line, "PAGE CLOCK") == 0) {
                 ui_nav_request(UI_NAV_CLOCK);
+            } else if (strcmp(line, "WSCAN") == 0) {
+                app_wifi_ensure_started();
+                app_wifi_cmd_scan();
+            } else if (strncmp(line, "WCONNECT ", 9) == 0) {
+                /* WCONNECT <ssid> [password]：无第三段=用保存凭据；"-"=开放网络 */
+                char ssid[33] = {0};
+                char pwd[65] = {0};
+                int n = sscanf(line + 9, "%32s %64s", ssid, pwd);
+                if (n >= 1) {
+                    app_wifi_ensure_started();
+                    if (n == 1) {
+                        app_wifi_cmd_connect(ssid, NULL);
+                    } else {
+                        app_wifi_cmd_connect(ssid, strcmp(pwd, "-") == 0 ? "" : pwd);
+                    }
+                }
             }
             continue;
         }
