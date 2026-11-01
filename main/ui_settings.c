@@ -5,6 +5,7 @@
 #include "ui_settings.h"
 #include "ui_clock.h"
 #include "ui_wifi.h"
+#include "ui_keyboard.h"
 #include "bsp_lcd.h"
 #include "bsp_power.h"
 
@@ -12,6 +13,31 @@
 
 /* 页面导航请求：任意任务置位（volatile），gui_task 轮询消费 */
 static volatile ui_nav_req_t s_nav_req = UI_NAV_NONE;
+static ui_nav_req_t s_current_page = UI_NAV_CLOCK;
+
+void ui_nav_set_current(ui_nav_req_t p)
+{
+    s_current_page = p;
+}
+
+void ui_nav_swipe_dispatch(lv_dir_t dir)
+{
+    if (ui_keyboard_is_open()) {
+        return; /* 键盘模态：滑动不切页 */
+    }
+    if (s_current_page == UI_NAV_CLOCK) {
+        if (dir == LV_DIR_TOP) {
+            ESP_LOGI(TAG, "swipe up -> settings");
+            ui_settings_show();
+        }
+    } else if (s_current_page == UI_NAV_SETTINGS) {
+        if (dir == LV_DIR_BOTTOM) {
+            ESP_LOGI(TAG, "swipe down -> clock");
+            ui_clock_show();
+        }
+    }
+    /* WiFi 页：滑动交给列表滚动与返回按钮 */
+}
 
 void ui_nav_request(ui_nav_req_t r)
 {
@@ -46,6 +72,7 @@ static void settings_gesture_cb(lv_event_t *e)
 {
     if (lv_event_get_code(e) == LV_EVENT_GESTURE) {
         lv_dir_t dir = lv_indev_get_gesture_dir(lv_indev_get_act());
+        ESP_LOGI(TAG, "settings gesture dir=%d", dir);
         if (dir == LV_DIR_BOTTOM) {
             /* 下滑返回时钟页 */
             ui_clock_show();
@@ -64,6 +91,7 @@ static lv_obj_t *row_create(lv_obj_t *parent, int y)
     lv_obj_set_style_radius(row, 12, 0);
     lv_obj_set_style_pad_all(row, 0, 0);
     lv_obj_add_flag(row, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_clear_flag(row, LV_OBJ_FLAG_SCROLLABLE); /* 行不可滚动，避免吞掉下滑手势 */
     lv_obj_set_style_bg_color(row, lv_color_hex(0x333333), LV_STATE_PRESSED);
     return row;
 }
@@ -119,6 +147,7 @@ void ui_settings_create(void)
     s_settings_screen = lv_obj_create(NULL);
     lv_obj_set_style_bg_color(s_settings_screen, lv_color_black(), 0);
     lv_obj_set_style_bg_opa(s_settings_screen, LV_OPA_COVER, 0);
+    lv_obj_clear_flag(s_settings_screen, LV_OBJ_FLAG_SCROLLABLE); /* 页面无滚动内容，手势优先 */
     lv_obj_add_event_cb(s_settings_screen, settings_gesture_cb, LV_EVENT_GESTURE, NULL);
 
     /* 标题 */
@@ -202,7 +231,11 @@ void ui_settings_create(void)
 
 void ui_settings_show(void)
 {
+    if (s_current_page == UI_NAV_SETTINGS) {
+        return; /* 已在设置页（自研滑动与 LVGL 手势双路径去重） */
+    }
     bsp_lcd_set_flush_mode(BSP_LCD_FLUSH_PASSTHROUGH);
     lv_scr_load_anim(s_settings_screen, LV_SCR_LOAD_ANIM_MOVE_TOP, 250, 0, false);
     ui_settings_refresh_battery();
+    ui_nav_set_current(UI_NAV_SETTINGS);
 }

@@ -16,3 +16,8 @@ void ui_wifi_create(void);
  * @brief 滑入 WiFi 页并触发扫描
  */
 void ui_wifi_show(void);
+
+/**
+ * @brief 调试：等效点击第 idx 行（gui_task 上下文调用）
+ */
+void ui_wifi_debug_tap_row(int idx);

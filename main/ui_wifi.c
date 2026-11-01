@@ -13,6 +13,7 @@
 
 static char s_target_ssid[33];   /* 键盘回调时连接的目标网络 */
 static void kb_on_ok(const char *password, void *user_data);
+static void row_click_cb(lv_event_t *e);
 
 #define WIFI_ROW_W      424
 #define WIFI_ROW_H      64
@@ -76,6 +77,7 @@ static void rebuild_list(void)
         lv_obj_set_style_radius(row, 10, 0);
         lv_obj_set_style_pad_all(row, 0, 0);
         lv_obj_add_flag(row, LV_OBJ_FLAG_CLICKABLE);
+        lv_obj_add_event_cb(row, row_click_cb, LV_EVENT_CLICKED, NULL);
         lv_obj_clear_flag(row, LV_OBJ_FLAG_SCROLLABLE);
 
         lv_obj_t *ssid = lv_label_create(row);
@@ -136,7 +138,8 @@ static void row_clicked(size_t idx)
     }
 }
 
-static void list_event_cb(lv_event_t *e)
+/* 行点击回调：直接挂在每行上（LVGL v8 事件默认不冒泡，挂在容器上收不到 CLICKED） */
+static void row_click_cb(lv_event_t *e)
 {
     if (lv_event_get_code(e) != LV_EVENT_CLICKED) {
         return;
@@ -198,6 +201,7 @@ void ui_wifi_create(void)
     s_wifi_screen = lv_obj_create(NULL);
     lv_obj_set_style_bg_color(s_wifi_screen, lv_color_black(), 0);
     lv_obj_set_style_bg_opa(s_wifi_screen, LV_OPA_COVER, 0);
+    lv_obj_clear_flag(s_wifi_screen, LV_OBJ_FLAG_SCROLLABLE); /* 页面级滚动交给列表容器，屏幕级清掉以免吞手势 */
     lv_obj_add_event_cb(s_wifi_screen, wifi_gesture_cb, LV_EVENT_GESTURE, NULL);
 
     /* 标题 + 返回 */
@@ -252,7 +256,6 @@ void ui_wifi_create(void)
     lv_obj_set_style_pad_all(s_list, 0, 0);
     lv_obj_add_flag(s_list, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_set_scroll_dir(s_list, LV_DIR_VER);
-    lv_obj_add_event_cb(s_list, list_event_cb, LV_EVENT_CLICKED, NULL);
 
     s_poll_timer = lv_timer_create(poll_timer_cb, 200, NULL);
     (void)s_poll_timer;
@@ -262,6 +265,14 @@ void ui_wifi_show(void)
 {
     bsp_lcd_set_flush_mode(BSP_LCD_FLUSH_PASSTHROUGH);
     lv_scr_load_anim(s_wifi_screen, LV_SCR_LOAD_ANIM_MOVE_TOP, 250, 0, false);
+    ui_nav_set_current(UI_NAV_WIFI);
     app_wifi_ensure_started();
     app_wifi_cmd_scan();
+}
+
+void ui_wifi_debug_tap_row(int idx)
+{
+    ESP_LOGI(TAG, "debug tap row %d (ap_count=%d)", idx, (int)app_wifi_get_status()->ap_count);
+    row_clicked((size_t)idx);
+    ESP_LOGI(TAG, "debug tap done, keyboard=%d", ui_keyboard_is_open());
 }

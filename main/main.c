@@ -6,6 +6,7 @@
 #include <esp_err.h>
 #include <esp_system.h>
 #include <nvs_flash.h>
+#include <esp_task_wdt.h>
 #include <driver/i2c_master.h>
 #include <driver/gpio.h>
 #include <driver/usb_serial_jtag.h>
@@ -48,6 +49,7 @@ typedef enum {
 
 static volatile kbd_dbg_cmd_t s_kbd_dbg_cmd = KBD_CMD_NONE;
 static volatile int s_kbd_dbg_key = -1;
+static volatile bool s_uitest_req = false;
 
 static void kbd_test_ok(const char *password, void *user_data)
 {
@@ -82,6 +84,28 @@ static void gui_handle_kbd_debug(void)
         ui_keyboard_debug_state(st, sizeof(st));
         ESP_LOGI(TAG, "%s", st);
     }
+}
+
+/* 无头复现用户流程：设置页 → WiFi 页扫描 → 点行 0（应弹键盘），逐步打点定位死锁 */
+static void gui_handle_uitest(void)
+{
+    if (!s_uitest_req) {
+        return;
+    }
+    s_uitest_req = false;
+
+    ESP_LOGI(TAG, "UITEST: 1/3 settings show");
+    ui_settings_show();
+    vTaskDelay(pdMS_TO_TICKS(600));
+
+    ESP_LOGI(TAG, "UITEST: 2/3 wifi show + scan");
+    ui_wifi_show();
+    vTaskDelay(pdMS_TO_TICKS(4000));
+
+    ESP_LOGI(TAG, "UITEST: 3/3 tap row 0");
+    ui_wifi_debug_tap_row(0);
+    vTaskDelay(pdMS_TO_TICKS(500));
+    ESP_LOGI(TAG, "UITEST: done (clock should continue)");
 }
 
 static void time_sync_task(void *arg)
@@ -167,6 +191,10 @@ static void time_sync_task(void *arg)
                     bsp_lcd_set_backlight((uint8_t)v);
                     ESP_LOGI(TAG, "backlight set to %d%%", v);
                 }
+            } else if (strcmp(line, "TPTEST") == 0) {
+                bsp_touch_debug_poll(10);
+            } else if (strcmp(line, "UITEST") == 0) {
+                s_uitest_req = true;
             }
             continue;
         }
@@ -223,6 +251,15 @@ static void gui_task(void *arg)
 
         /* 键盘调试命令（KBD/KBDMOCK/KBDDUMP） */
         gui_handle_kbd_debug();
+
+        /* 无头复现（UITEST） */
+        gui_handle_uitest();
+
+        /* 滑动事件（检测在 indev 回调内置位；必须在 LVGL 输入处理外执行切屏） */
+        lv_dir_t swipe = bsp_touch_consume_swipe();
+        if (swipe != 0) {
+            ui_nav_swipe_dispatch(swipe);
+        }
 
         /* 截图请求：强制全屏 invalidate，让 flush_cb 流出全部条带 */
         if (bsp_lcd_snapshot_begin_if_requested()) {

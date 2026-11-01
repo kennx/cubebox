@@ -81,6 +81,7 @@ static void clock_gesture_cb(lv_event_t *e)
 {
     if (lv_event_get_code(e) == LV_EVENT_GESTURE) {
         lv_dir_t dir = lv_indev_get_gesture_dir(lv_indev_get_act());
+        ESP_LOGI(TAG, "clock gesture dir=%d (1=L 2=R 4=T 8=B)", dir);
         if (dir == LV_DIR_TOP) {
             /* 底部上滑 → 打开设置页 */
             ui_settings_show();
@@ -93,8 +94,11 @@ void ui_clock_init(void)
     s_clock_screen = lv_obj_create(NULL);
     lv_obj_set_style_bg_color(s_clock_screen, lv_color_black(), 0);
     lv_obj_set_style_bg_opa(s_clock_screen, LV_OPA_COVER, 0);
+    lv_obj_clear_flag(s_clock_screen, LV_OBJ_FLAG_SCROLLABLE); /* screen 默认可滚动会吞手势（scroll_obj 置位后 indev_gesture 直接 return） */
 
-    /* 全屏透明手势捕获对象（点阵时钟由 flush 叠绘，LVGL 层无可见内容） */
+    /* 全屏透明手势捕获对象（点阵时钟由 flush 叠绘，LVGL 层无可见内容）。
+     * 必须清 SCROLLABLE：indev_gesture() 在 scroll_obj 置位时直接 return，
+     * 可滚动对象上的滑动只会触发滚动、永远不派发手势事件 */
     lv_obj_t *gesture = lv_obj_create(s_clock_screen);
     lv_obj_set_size(gesture, 480, 480);
     lv_obj_set_pos(gesture, 0, 0);
@@ -102,15 +106,18 @@ void ui_clock_init(void)
     lv_obj_set_style_border_width(gesture, 0, 0);
     lv_obj_set_style_pad_all(gesture, 0, 0);
     lv_obj_add_flag(gesture, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_clear_flag(gesture, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_add_event_cb(gesture, clock_gesture_cb, LV_EVENT_GESTURE, NULL);
 
     lv_scr_load(s_clock_screen);
+    ui_nav_set_current(UI_NAV_CLOCK);
 }
 
 void ui_clock_show(void)
 {
     bsp_lcd_set_flush_mode(BSP_LCD_FLUSH_CLOCK_OVERLAY);
     lv_scr_load_anim(s_clock_screen, LV_SCR_LOAD_ANIM_MOVE_BOTTOM, 250, 0, false);
+    ui_nav_set_current(UI_NAV_CLOCK);
 }
 
 /**
