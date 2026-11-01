@@ -16,6 +16,7 @@
 #include "bsp_touch.h"
 #include "ui_clock.h"
 #include "ui_settings.h"
+#include "ui_keyboard.h"
 #include "app_wifi.h"
 
 LV_FONT_DECLARE(lv_font_montserrat_48);
@@ -36,6 +37,52 @@ static uint32_t s_low_power_enter_ms = 0;
  * 时间同步任务：通过 USB-Serial/JTAG（辅助 console）接收
  * "SETTIME YYYY-MM-DD HH:MM:SS" 命令，把电脑本地时间写入 PCF85063 RTC。
  */
+
+/* 键盘调试命令（console 任务置标志，gui_task 消费——LVGL 只在 gui 上下文调用） */
+typedef enum {
+    KBD_CMD_NONE = 0,
+    KBD_CMD_OPEN_TEST,
+    KBD_CMD_DUMP,
+} kbd_dbg_cmd_t;
+
+static volatile kbd_dbg_cmd_t s_kbd_dbg_cmd = KBD_CMD_NONE;
+static volatile int s_kbd_dbg_key = -1;
+
+static void kbd_test_ok(const char *password, void *user_data)
+{
+    ESP_LOGI(TAG, "KBD OK: password='%s'", password);
+    (void)user_data;
+}
+
+static void kbd_test_cancel(void *user_data)
+{
+    ESP_LOGI(TAG, "KBD CANCEL");
+    (void)user_data;
+}
+
+static void gui_handle_kbd_debug(void)
+{
+    if (s_kbd_dbg_key >= 0) {
+        ui_keyboard_debug_tap(s_kbd_dbg_key);
+        s_kbd_dbg_key = -1;
+    }
+    kbd_dbg_cmd_t cmd = s_kbd_dbg_cmd;
+    s_kbd_dbg_cmd = KBD_CMD_NONE;
+    if (cmd == KBD_CMD_OPEN_TEST) {
+        const ui_keyboard_cfg_t cfg = {
+            .title = "TEST-NET",
+            .on_ok = kbd_test_ok,
+            .on_cancel = kbd_test_cancel,
+        };
+        ui_settings_show();
+        ui_keyboard_open(lv_scr_act(), &cfg);
+    } else if (cmd == KBD_CMD_DUMP) {
+        char st[128];
+        ui_keyboard_debug_state(st, sizeof(st));
+        ESP_LOGI(TAG, "%s", st);
+    }
+}
+
 static void time_sync_task(void *arg)
 {
     usb_serial_jtag_driver_config_t jtag_cfg = {
@@ -101,6 +148,15 @@ static void time_sync_task(void *arg)
                         app_wifi_cmd_connect(ssid, strcmp(pwd, "-") == 0 ? "" : pwd);
                     }
                 }
+            } else if (strcmp(line, "KBD") == 0) {
+                s_kbd_dbg_cmd = KBD_CMD_OPEN_TEST;
+            } else if (strncmp(line, "KBDMOCK ", 8) == 0) {
+                int k = -1;
+                if (sscanf(line + 8, "%d", &k) == 1) {
+                    s_kbd_dbg_key = k;
+                }
+            } else if (strcmp(line, "KBDDUMP") == 0) {
+                s_kbd_dbg_cmd = KBD_CMD_DUMP;
             }
             continue;
         }
@@ -151,6 +207,9 @@ static void gui_task(void *arg)
         } else if (nav == UI_NAV_CLOCK) {
             ui_clock_show();
         }
+
+        /* 键盘调试命令（KBD/KBDMOCK/KBDDUMP） */
+        gui_handle_kbd_debug();
 
         /* 截图请求：强制全屏 invalidate，让 flush_cb 流出全部条带 */
         if (bsp_lcd_snapshot_begin_if_requested()) {
