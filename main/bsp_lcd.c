@@ -1,9 +1,11 @@
 #include <stdint.h>
+#include <stdio.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
 #include <esp_log.h>
 #include <esp_err.h>
 #include <driver/spi_master.h>
+#include <driver/usb_serial_jtag.h>
 #include <esp_lcd_panel_io.h>
 #include <esp_lcd_panel_ops.h>
 #include "esp_lcd_sh8601.h"
@@ -29,6 +31,26 @@
 
 static esp_lcd_panel_io_handle_t lcd_io = NULL;
 static esp_lcd_panel_handle_t lcd_panel = NULL;
+
+/* 截图调试：请求标志任意任务置位，活动状态仅 gui_task 上下文访问 */
+static volatile bool s_snap_req = false;
+static bool s_snap_active = false;
+static char s_snap_line[LCD_WIDTH * 4 + 32];
+
+void bsp_lcd_snapshot_arm(void)
+{
+    s_snap_req = true;
+}
+
+bool bsp_lcd_snapshot_begin_if_requested(void)
+{
+    if (s_snap_req && !s_snap_active) {
+        s_snap_req = false;
+        s_snap_active = true;
+        return true;
+    }
+    return false;
+}
 
 /* LCD init commands - must be global/static for SH8601 driver */
 static const uint8_t lcd_data_00[] = {0x00};
@@ -116,6 +138,31 @@ static void lvgl_flush_cb(lv_disp_drv_t *drv, const lv_area_t *area, lv_color_t 
 
     /* 点阵时钟/状态栏像素叠绘：在送显前对 swap_buf 做逐像素覆盖 */
     ui_clock_overlay_apply(area, color_map, swap_buf);
+
+    /* 截图调试：逐行流出最终送显像素（RGB565 hex，内存字节序）。
+     * 每行一条 "#SNAP x1 y x2 y" + 该行 hex（≤1952B 单次写，防溢出），
+     * host 端按坐标覆盖重组；END 后仍可能收到个别迟到条带，host 端忽略即可。 */
+    if (s_snap_active) {
+        static const char hx[] = "0123456789abcdef";
+        for (uint32_t row = 0; row < height; row++) {
+            int gy = offsety1 + row;
+            int n = snprintf(s_snap_line, sizeof(s_snap_line), "#SNAP %d %d %d %d\n",
+                             offsetx1, gy, offsetx2, gy);
+            for (uint32_t x = 0; x < width; x++) {
+                uint16_t v = swap_buf[row * width + x].full;
+                s_snap_line[n++] = hx[(v >> 4) & 0xF];
+                s_snap_line[n++] = hx[v & 0xF];
+                s_snap_line[n++] = hx[(v >> 12) & 0xF];
+                s_snap_line[n++] = hx[(v >> 8) & 0xF];
+            }
+            s_snap_line[n++] = '\n';
+            usb_serial_jtag_write_bytes(s_snap_line, n, pdMS_TO_TICKS(1000));
+        }
+        if (offsety2 == LCD_HEIGHT - 1) {
+            usb_serial_jtag_write_bytes("#SNAP END\n", 10, pdMS_TO_TICKS(1000));
+            s_snap_active = false;
+        }
+    }
 
     esp_err_t ret = esp_lcd_panel_draw_bitmap(panel_handle, offsetx1, offsety1, offsetx2 + 1, offsety2 + 1, swap_buf);
     if (ret != ESP_OK) {

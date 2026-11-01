@@ -30,7 +30,7 @@ static void time_sync_task(void *arg)
 {
     usb_serial_jtag_driver_config_t jtag_cfg = {
         .rx_buffer_size = 256,
-        .tx_buffer_size = 256,
+        .tx_buffer_size = 4096, /* 必须大于单次写入长度（截图行 ~1945B），驱动环形缓冲整段写入是 all-or-nothing */
     };
     if (usb_serial_jtag_driver_install(&jtag_cfg) != ESP_OK) {
         ESP_LOGE(TAG, "USB-Serial/JTAG driver install failed, time sync disabled");
@@ -67,6 +67,8 @@ static void time_sync_task(void *arg)
                 } else {
                     ESP_LOGE(TAG, "RTC set failed: %s", esp_err_to_name(ret));
                 }
+            } else if (strcmp(line, "SNAP") == 0) {
+                bsp_lcd_snapshot_arm();
             }
             continue;
         }
@@ -94,6 +96,11 @@ static void gui_task(void *arg)
         if (now - last_rtc_update >= 1000 || last_rtc_update == 0) {
             ui_clock_tick_refresh();
             last_rtc_update = now;
+        }
+
+        /* 截图请求：强制全屏 invalidate，让 flush_cb 流出全部条带 */
+        if (bsp_lcd_snapshot_begin_if_requested()) {
+            lv_obj_invalidate(lv_scr_act());
         }
 
         lv_timer_handler();
