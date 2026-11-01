@@ -4,6 +4,7 @@
 #include <freertos/task.h>
 #include <esp_log.h>
 #include <esp_err.h>
+#include <esp_system.h>
 #include <driver/i2c_master.h>
 #include <driver/gpio.h>
 #include <driver/usb_serial_jtag.h>
@@ -11,6 +12,7 @@
 #include "bsp_power.h"
 #include "bsp_rtc.h"
 #include "bsp_lcd.h"
+#include "bsp_touch.h"
 #include "ui_clock.h"
 
 LV_FONT_DECLARE(lv_font_montserrat_48);
@@ -69,6 +71,8 @@ static void time_sync_task(void *arg)
                 }
             } else if (strcmp(line, "SNAP") == 0) {
                 bsp_lcd_snapshot_arm();
+            } else if (strcmp(line, "REBOOT") == 0) {
+                esp_restart();
             }
             continue;
         }
@@ -139,6 +143,7 @@ void app_main(void)
     bsp_power_init(i2c_bus);
     bsp_rtc_init(i2c_bus);
     bsp_lcd_init();         /* Initialize LCD + LVGL（内部先做屏电源复位） */
+    bsp_touch_init(i2c_bus); /* CST9220 触摸 + LVGL pointer indev */
 
     xTaskCreate(gui_task, "gui_task", 4096 * 2, NULL, 5, NULL);
     xTaskCreate(time_sync_task, "time_sync", 4096, NULL, 5, NULL);
