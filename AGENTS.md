@@ -25,9 +25,26 @@
 - `docs/superpowers/`：设计规格与实现计划
   - `plans/`：实现计划（如矩阵时钟重构计划）
   - `specs/`：设计规格（如 Nothing Phone 风格点阵时钟设计）
-- `managed_components/`：IDF 组件管理器自动下载的依赖（如 `lvgl__lvgl`、`espressif__esp_lcd_sh8601`）。**对 Agent 只读**。
+- `managed_components/`：IDF 组件管理器自动下载的依赖（如 `lvgl__lvgl`、`espressif__esp_lcd_sh8601`、`waveshare__esp_lcd_touch_cst9217`）。**对 Agent 只读**。
 - `sdkconfig` / `sdkconfig.defaults`：项目 Kconfig 配置。修改后需重新运行 `idf.py reconfigure`。
 - `partitions.csv`：Flash 分区表。当前包含 nvs、phy_init、factory（6M app）、storage（3M SPIFFS）。
+
+### main/ 模块地图（2026-11 设置页+WiFi 对时+低功耗重构后）
+
+| 模块 | 职责 |
+|------|------|
+| `main.c` | app_main 初始化顺序、i2c 总线创建、gui_task 主循环（走时+低功耗+导航+调试命令）、USB 控制台（SETTIME/SNAP/REBOOT/PAGE/WSCAN/WCONNECT/KBD 系列） |
+| `bsp_power.c` | AXP2101：PMIC 初始化、电量读取、ALDO3 屏复位 |
+| `bsp_rtc.c` | PCF85063：读写日期时间、星期算法 |
+| `bsp_lcd.c` | QSPI 面板、LVGL 显示驱动、flush_cb（含 CLOCK_OVERLAY/PASSTHROUGH 模式开关）、背光（0x51 命令 + NVS 用户亮度 + 低功耗 raw/restore）、截图流式输出 |
+| `bsp_touch.c` | CST9220 触摸（cst9217 组件）+ LVGL indev、最近触摸时间戳、唤醒吞点击；方向 flags 集中在文件顶部 3 个宏 |
+| `ui_clock.c` | 时钟页：点阵像素叠绘（flush 钩子）、上滑手势开设置页、每秒走时 |
+| `ui_settings.c` | 设置页：WiFi 行/亮度滑条/电量行、页面导航请求（ui_nav_*）、下滑返回 |
+| `ui_wifi.c` | WiFi 子页：扫描列表、连接分流（直连/弹键盘）、状态轮询 |
+| `ui_keyboard.c` | T9 九宫格密码键盘（多击/大小写/符号页） |
+| `app_wifi.c` | WiFi 管理器：懒初始化、扫描/连接/SNTP 对时状态机、NVS 凭据（8 槽按 SSID 去重）、对时后彻底 deinit |
+
+**关键约束**：所有 LVGL 调用仅限 gui_task 上下文；其他任务经 `ui_nav_request`/命令队列/`lv_timer` 轮询交接。WiFi/蓝牙绝不自动开启——`app_wifi_ensure_started()` 只在用户于 WiFi 页主动操作时调用。
 
 > 随着功能增长，代码应从 `main.c` 逐步拆分为 `components/` 或 `main/` 下的模块化文件（如 `bsp_power.c`、`bsp_lcd.c`、`ui_clock.c`）。拆分原则：一个文件聚焦一个子系统，避免 `main.c` 超过 800 行。
 
@@ -117,7 +134,14 @@ idf.py set-target esp32c6
 - **烧录与 RTC 对时**：
   - 日常开发使用 `tools/flash.sh [PORT]` 一键完成编译、烧录，并自动把电脑本机时间写入 PCF85063 RTC（复位设备 → 等 `time_sync ready` → 发送 `SETTIME YYYY-MM-DD HH:MM:SS` → 校验读回偏差 ≤1s）。
   - 仅对时不烧录：`tools/sync_rtc.py --port /dev/cu.usbmodem1101`（需 pyserial，建议在 IDF 环境下运行）。
+  - 设备脱离电脑对时：设置页 → WiFi → 选网络（有保存密码直连，否则 T9 键盘输入）→ 自动 SNTP 对时并断开。
   - 固件侧由 `main.c` 的 `time_sync_task` 经 USB-Serial/JTAG 辅助 console 接收命令；主 console 是 UART0，stdin 收不到 USB 数据，不要改用 stdin 读取。
+- **远程调试（USB 控制台命令，同一辅助 console 通道）**：
+  - `SNAP` + `tools/screenshot.py -p PORT -o shot.png`：抓取屏幕 PNG（含点阵叠绘的最终像素；用系统 python 跑，IDF venv 缺 Pillow）。
+  - `REBOOT`：远程重启（抓完整启动日志用）。
+  - `PAGE CLOCK|SETTINGS|WIFI`：无触指环境远程切页验证。
+  - `WSCAN` / `WCONNECT <ssid> [password]`：WiFi 扫描/连接对时（单参数=用 NVS 保存凭据，`-`=开放网络）。
+  - `KBD` / `KBDMOCK <n>` / `KBDDUMP`：T9 键盘布局与多击逻辑注入测试。
 - **验证要求**：
   - 完成功能后，必须执行构建验证：`idf.py build`
   - 若进行了配置变更或依赖变更，执行完整清理构建：`idf.py fullclean && idf.py build`
