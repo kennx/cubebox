@@ -30,6 +30,26 @@ bsp_lcd_flush_mode_t bsp_lcd_get_flush_mode(void);
 void bsp_lcd_set_backlight(uint8_t brightness);
 
 /**
+ * @brief 用户亮度设置（设置页滑条）：写背光 + NVS 持久化
+ * @param pct 10-100（越界自动钳制）
+ */
+void bsp_lcd_set_brightness_pct(uint8_t pct);
+uint8_t bsp_lcd_get_brightness_pct(void);
+
+/**
+ * @brief 低功耗用：只改当前生效亮度，不动用户设定值、不写 NVS
+ */
+void bsp_lcd_set_brightness_raw(uint8_t pct);
+
+/**
+ * @brief 恢复用户设定亮度（低功耗唤醒时调用）
+ */
+void bsp_lcd_restore_user_brightness(void);
+
+/* 低功耗亮度（≈10/255，待真机标定后调整） */
+#define BSP_LCD_BRIGHTNESS_LOW_PCT 4
+
+/**
  * @brief 请求一次屏幕截图（任意任务可调用；经 USB-Serial/JTAG 流式输出）
  * @note gui_task 轮询 bsp_lcd_snapshot_begin_if_requested() 触发全屏 invalidate，
  *       随后 flush_cb 按 "#SNAP x1 y1 x2 y2"+RGB565 hex 条带流出，"#SNAP END" 结束

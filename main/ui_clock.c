@@ -3,7 +3,9 @@
 #include <esp_log.h>
 #include "lvgl.h"
 #include "ui_clock.h"
+#include "ui_settings.h"
 #include "bsp_rtc.h"
+#include "bsp_lcd.h"
 
 #define TAG "ui_clock"
 
@@ -73,6 +75,44 @@ static const int date_char_x[15] = {
 static char current_time_str[16] = "00:00:00";
 static char current_date_str[32] = "MON JUN 01 2026"; // 全局日期字符串，32B 留有余量
 
+static lv_obj_t *s_clock_screen = NULL;
+
+static void clock_gesture_cb(lv_event_t *e)
+{
+    if (lv_event_get_code(e) == LV_EVENT_GESTURE) {
+        lv_dir_t dir = lv_indev_get_gesture_dir(lv_indev_get_act());
+        if (dir == LV_DIR_TOP) {
+            /* 底部上滑 → 打开设置页 */
+            ui_settings_show();
+        }
+    }
+}
+
+void ui_clock_init(void)
+{
+    s_clock_screen = lv_obj_create(NULL);
+    lv_obj_set_style_bg_color(s_clock_screen, lv_color_black(), 0);
+    lv_obj_set_style_bg_opa(s_clock_screen, LV_OPA_COVER, 0);
+
+    /* 全屏透明手势捕获对象（点阵时钟由 flush 叠绘，LVGL 层无可见内容） */
+    lv_obj_t *gesture = lv_obj_create(s_clock_screen);
+    lv_obj_set_size(gesture, 480, 480);
+    lv_obj_set_pos(gesture, 0, 0);
+    lv_obj_set_style_bg_opa(gesture, LV_OPA_TRANSP, 0);
+    lv_obj_set_style_border_width(gesture, 0, 0);
+    lv_obj_set_style_pad_all(gesture, 0, 0);
+    lv_obj_add_flag(gesture, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_add_event_cb(gesture, clock_gesture_cb, LV_EVENT_GESTURE, NULL);
+
+    lv_scr_load(s_clock_screen);
+}
+
+void ui_clock_show(void)
+{
+    bsp_lcd_set_flush_mode(BSP_LCD_FLUSH_CLOCK_OVERLAY);
+    lv_scr_load_anim(s_clock_screen, LV_SCR_LOAD_ANIM_MOVE_BOTTOM, 250, 0, false);
+}
+
 /**
  * @brief 字符到 font_5x7 点阵字模索引映射
  * @note 假设输入为 ASCII 编码；小写字母通过算术运算转换为大写
@@ -90,6 +130,11 @@ static int char_to_font_idx(char ch)
 
 void ui_clock_tick_refresh(void)
 {
+    /* 设置页等透传页面不需要走时重绘（返回时钟页后 1s 内恢复） */
+    if (bsp_lcd_get_flush_mode() != BSP_LCD_FLUSH_CLOCK_OVERLAY) {
+        return;
+    }
+
     uint8_t hour = 0, min = 0, sec = 0;
     uint8_t day = 1, weekday = 1, month = 6, year = 26;
 

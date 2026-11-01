@@ -5,6 +5,7 @@
 #include <esp_log.h>
 #include <esp_err.h>
 #include <esp_system.h>
+#include <nvs_flash.h>
 #include <driver/i2c_master.h>
 #include <driver/gpio.h>
 #include <driver/usb_serial_jtag.h>
@@ -14,6 +15,7 @@
 #include "bsp_lcd.h"
 #include "bsp_touch.h"
 #include "ui_clock.h"
+#include "ui_settings.h"
 
 LV_FONT_DECLARE(lv_font_montserrat_48);
 
@@ -73,6 +75,10 @@ static void time_sync_task(void *arg)
                 bsp_lcd_snapshot_arm();
             } else if (strcmp(line, "REBOOT") == 0) {
                 esp_restart();
+            } else if (strcmp(line, "PAGE SETTINGS") == 0) {
+                ui_nav_request(UI_NAV_SETTINGS);
+            } else if (strcmp(line, "PAGE CLOCK") == 0) {
+                ui_nav_request(UI_NAV_CLOCK);
             }
             continue;
         }
@@ -84,10 +90,9 @@ static void time_sync_task(void *arg)
 
 static void gui_task(void *arg)
 {
-    /* Set screen background to black */
-    lv_obj_t *scr = lv_scr_act();
-    lv_obj_set_style_bg_color(scr, lv_color_black(), 0);
-    lv_obj_set_style_bg_opa(scr, LV_OPA_COVER, 0);
+    /* 创建常驻页面：时钟页（设为活动页）+ 设置页 */
+    ui_clock_init();
+    ui_settings_create();
 
     uint32_t last_rtc_update = 0;
 
@@ -98,6 +103,14 @@ static void gui_task(void *arg)
         if (now - last_rtc_update >= 1000 || last_rtc_update == 0) {
             ui_clock_tick_refresh();
             last_rtc_update = now;
+        }
+
+        /* 页面导航请求（控制台/手势路径之外的远程触发） */
+        ui_nav_req_t nav = ui_nav_poll_request();
+        if (nav == UI_NAV_SETTINGS) {
+            ui_settings_show();
+        } else if (nav == UI_NAV_CLOCK) {
+            ui_clock_show();
         }
 
         /* 截图请求：强制全屏 invalidate，让 flush_cb 流出全部条带 */
@@ -123,6 +136,14 @@ void app_main(void)
     gpio_config(&tf_cs_cfg);
     gpio_set_level(6, 1);
     ESP_LOGI("main", "TF Card CS (GPIO 6) pulled high to release shared SPI bus");
+
+    /* NVS：亮度设置 + WiFi 凭据存储（不含无线电，开机即初始化） */
+    esp_err_t err = nvs_flash_init();
+    if (err == ESP_ERR_NVS_NO_FREE_PAGES || err == ESP_ERR_NVS_NEW_VERSION_FOUND) {
+        ESP_ERROR_CHECK(nvs_flash_erase());
+        err = nvs_flash_init();
+    }
+    ESP_ERROR_CHECK(err);
 
     /* Shared I2C bus: AXP2101 / PCF85063 / 触摸（后续） */
     i2c_master_bus_config_t bus_cfg = {

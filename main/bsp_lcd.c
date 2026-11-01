@@ -13,6 +13,8 @@
 #include "lvgl.h"
 #include "esp_timer.h"
 #include <esp_heap_caps.h>
+#include <nvs_flash.h>
+#include <nvs.h>
 #include "bsp_lcd.h"
 #include "bsp_power.h"
 #include "ui_clock.h"
@@ -34,6 +36,43 @@ static esp_lcd_panel_io_handle_t lcd_io = NULL;
 static esp_lcd_panel_handle_t lcd_panel = NULL;
 
 static bsp_lcd_flush_mode_t s_flush_mode = BSP_LCD_FLUSH_CLOCK_OVERLAY;
+
+/* 用户亮度（NVS 持久化）；低功耗 dim 不修改该值 */
+static uint8_t s_brightness_pct = 100;
+
+void bsp_lcd_set_brightness_pct(uint8_t pct)
+{
+    if (pct < 10) {
+        pct = 10;
+    }
+    if (pct > 100) {
+        pct = 100;
+    }
+    s_brightness_pct = pct;
+    bsp_lcd_set_backlight(pct);
+
+    nvs_handle_t nvs;
+    if (nvs_open("settings", NVS_READWRITE, &nvs) == ESP_OK) {
+        nvs_set_u8(nvs, "brightness", pct);
+        nvs_commit(nvs);
+        nvs_close(nvs);
+    }
+}
+
+uint8_t bsp_lcd_get_brightness_pct(void)
+{
+    return s_brightness_pct;
+}
+
+void bsp_lcd_set_brightness_raw(uint8_t pct)
+{
+    bsp_lcd_set_backlight(pct);
+}
+
+void bsp_lcd_restore_user_brightness(void)
+{
+    bsp_lcd_set_backlight(s_brightness_pct);
+}
 
 void bsp_lcd_set_flush_mode(bsp_lcd_flush_mode_t mode)
 {
@@ -99,9 +138,11 @@ void bsp_lcd_set_backlight(uint8_t brightness)
 {
     uint8_t bl_val = (brightness * 255) / 100;
     uint32_t cmd = (0x02 << 24) | (0x51 << 8);
-    ESP_LOGI(TAG, "Setting backlight: brightness=%d, bl_val=0x%02X, cmd=0x%08X", brightness, bl_val, cmd);
+    ESP_LOGD(TAG, "Setting backlight: brightness=%d, bl_val=0x%02X", brightness, bl_val);
     esp_err_t ret = esp_lcd_panel_io_tx_param(lcd_io, cmd, &bl_val, 1);
-    ESP_LOGI(TAG, "Backlight command result: %s", esp_err_to_name(ret));
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Backlight command failed: %s", esp_err_to_name(ret));
+    }
 }
 
 static void lcd_diagnostic_fill(uint16_t color)
@@ -270,7 +311,20 @@ void bsp_lcd_init(void)
     ESP_LOGI(TAG, "Turning LCD display on...");
     ESP_ERROR_CHECK(esp_lcd_panel_disp_on_off(lcd_panel, true));
 
-    bsp_lcd_set_backlight(100);
+    /* 应用 NVS 保存的用户亮度（首次启动默认 100） */
+    {
+        nvs_handle_t nvs;
+        if (nvs_open("settings", NVS_READONLY, &nvs) == ESP_OK) {
+            uint8_t saved = 100;
+            if (nvs_get_u8(nvs, "brightness", &saved) == ESP_OK) {
+                if (saved >= 10 && saved <= 100) {
+                    s_brightness_pct = saved;
+                }
+            }
+            nvs_close(nvs);
+        }
+    }
+    bsp_lcd_set_backlight(s_brightness_pct);
     lcd_diagnostic_fill(0xFFFF);
     vTaskDelay(pdMS_TO_TICKS(1000));
     lcd_diagnostic_fill(0x0000);
