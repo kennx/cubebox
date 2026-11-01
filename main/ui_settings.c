@@ -4,6 +4,7 @@
 #include "lvgl.h"
 #include "ui_settings.h"
 #include "ui_clock.h"
+#include "ui_wifi.h"
 #include "bsp_lcd.h"
 #include "bsp_power.h"
 
@@ -29,6 +30,12 @@ static lv_obj_t *s_battery_fill = NULL;
 static lv_obj_t *s_battery_label = NULL;
 static lv_obj_t *s_bright_label = NULL;
 static lv_timer_t *s_battery_timer = NULL;
+
+static void wifi_row_click_cb(lv_event_t *e)
+{
+    (void)e;
+    ui_wifi_show();
+}
 
 /* 电池图形几何常量：外壳 + 内部电量条 */
 #define BAT_SHELL_W     120
@@ -116,9 +123,10 @@ void ui_settings_create(void)
     lv_obj_set_style_text_font(title, &lv_font_montserrat_28, 0);
     lv_obj_set_style_text_color(title, lv_color_white(), 0);
 
-    /* 行 1：WiFi（Task 9 接 WiFi 子页，本任务仅按压反馈） */
+    /* 行 1：WiFi → WiFi 子页 */
     lv_obj_t *wifi_row = row_create(s_settings_screen, 110);
     row_label_create(wifi_row, "WiFi");
+    lv_obj_add_event_cb(wifi_row, wifi_row_click_cb, LV_EVENT_CLICKED, NULL);
     lv_obj_t *chevron = lv_label_create(wifi_row);
     lv_obj_set_pos(chevron, 376, 26);
     lv_label_set_text(chevron, ">");

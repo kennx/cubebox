@@ -9,6 +9,7 @@
 typedef enum {
     UI_NAV_NONE = 0,
     UI_NAV_SETTINGS,
+    UI_NAV_WIFI,
     UI_NAV_CLOCK,
 } ui_nav_req_t;
 

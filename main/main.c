@@ -16,6 +16,7 @@
 #include "bsp_touch.h"
 #include "ui_clock.h"
 #include "ui_settings.h"
+#include "ui_wifi.h"
 #include "ui_keyboard.h"
 #include "app_wifi.h"
 
@@ -130,6 +131,8 @@ static void time_sync_task(void *arg)
                 esp_restart();
             } else if (strcmp(line, "PAGE SETTINGS") == 0) {
                 ui_nav_request(UI_NAV_SETTINGS);
+            } else if (strcmp(line, "PAGE WIFI") == 0) {
+                ui_nav_request(UI_NAV_WIFI);
             } else if (strcmp(line, "PAGE CLOCK") == 0) {
                 ui_nav_request(UI_NAV_CLOCK);
             } else if (strcmp(line, "WSCAN") == 0) {
@@ -168,9 +171,10 @@ static void time_sync_task(void *arg)
 
 static void gui_task(void *arg)
 {
-    /* 创建常驻页面：时钟页（设为活动页）+ 设置页 */
+    /* 创建常驻页面：时钟页（设为活动页）+ 设置页 + WiFi 页 */
     ui_clock_init();
     ui_settings_create();
+    ui_wifi_create();
 
     uint32_t last_rtc_update = 0;
 
@@ -204,6 +208,8 @@ static void gui_task(void *arg)
         ui_nav_req_t nav = ui_nav_poll_request();
         if (nav == UI_NAV_SETTINGS) {
             ui_settings_show();
+        } else if (nav == UI_NAV_WIFI) {
+            ui_wifi_show();
         } else if (nav == UI_NAV_CLOCK) {
             ui_clock_show();
         }
