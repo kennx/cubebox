@@ -114,6 +114,10 @@ idf.py set-target esp32c6
   - 修复 bug 需说明根因；架构决策需简要说明理由。
 - **文件读取**：如果 **rg** 可用，优先使用 `rg` / `rg --files`。
 - **代码修改前**：先阅读相关源码和最近的约束文档；设计变更时，优先遵循现有边界和本地模式。
+- **烧录与 RTC 对时**：
+  - 日常开发使用 `tools/flash.sh [PORT]` 一键完成编译、烧录，并自动把电脑本机时间写入 PCF85063 RTC（复位设备 → 等 `time_sync ready` → 发送 `SETTIME YYYY-MM-DD HH:MM:SS` → 校验读回偏差 ≤1s）。
+  - 仅对时不烧录：`tools/sync_rtc.py --port /dev/cu.usbmodem1101`（需 pyserial，建议在 IDF 环境下运行）。
+  - 固件侧由 `main.c` 的 `time_sync_task` 经 USB-Serial/JTAG 辅助 console 接收命令；主 console 是 UART0，stdin 收不到 USB 数据，不要改用 stdin 读取。
 - **验证要求**：
   - 完成功能后，必须执行构建验证：`idf.py build`
   - 若进行了配置变更或依赖变更，执行完整清理构建：`idf.py fullclean && idf.py build`

@@ -6,6 +6,7 @@
 #include <esp_err.h>
 #include <driver/i2c_master.h>
 #include <driver/spi_master.h>
+#include <driver/usb_serial_jtag.h>
 #include <esp_lcd_panel_io.h>
 #include <esp_lcd_panel_ops.h>
 #include <esp_lcd_panel_vendor.h>
@@ -277,8 +278,99 @@ static esp_err_t rtc_pcf85063_get_datetime(uint8_t *hour, uint8_t *minute, uint8
     *weekday = bcd2dec(data[4] & 0x07);
     *month   = bcd2dec(data[5] & 0x1F);
     *year    = bcd2dec(data[6]);
-    
+
     return ESP_OK;
+}
+
+static inline uint8_t dec2bcd(uint8_t val)
+{
+    return ((val / 10) << 4) | (val % 10);
+}
+
+/* Sakamoto 算法：由日期计算星期，0=周日（与 PCF85063 weekday 编码一致） */
+static int day_of_week(int y, int m, int d)
+{
+    static const int t[] = {0, 3, 2, 5, 0, 3, 5, 1, 4, 6, 2, 4};
+    if (m < 3) {
+        y -= 1;
+    }
+    return (y + y / 4 - y / 100 + y / 400 + t[m - 1] + d) % 7;
+}
+
+static esp_err_t rtc_pcf85063_set_datetime(uint8_t year, uint8_t month, uint8_t day, uint8_t weekday,
+                                           uint8_t hour, uint8_t minute, uint8_t second)
+{
+    if (pcf85063_dev == NULL) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    /* 置 Control_1 STOP 位暂停计数，保证各寄存器原子更新 */
+    esp_err_t ret = rtc_pcf85063_write_reg(0x00, 0x20);
+    if (ret != ESP_OK) {
+        return ret;
+    }
+    uint8_t buf[8] = {
+        0x04, /* 起始寄存器地址：Seconds */
+        dec2bcd(second), dec2bcd(minute), dec2bcd(hour),
+        dec2bcd(day), dec2bcd(weekday), dec2bcd(month), dec2bcd(year),
+    };
+    ret = i2c_master_transmit(pcf85063_dev, buf, 8, pdMS_TO_TICKS(1000));
+    /* 无论写入结果如何都恢复运行（同时回到 24H 模式） */
+    esp_err_t ret2 = rtc_pcf85063_write_reg(0x00, 0x00);
+    return (ret != ESP_OK) ? ret : ret2;
+}
+
+/*
+ * 时间同步任务：通过 USB-Serial/JTAG（辅助 console）接收
+ * "SETTIME YYYY-MM-DD HH:MM:SS" 命令，把电脑本地时间写入 PCF85063 RTC。
+ */
+static void time_sync_task(void *arg)
+{
+    usb_serial_jtag_driver_config_t jtag_cfg = {
+        .rx_buffer_size = 256,
+        .tx_buffer_size = 256,
+    };
+    if (usb_serial_jtag_driver_install(&jtag_cfg) != ESP_OK) {
+        ESP_LOGE(TAG, "USB-Serial/JTAG driver install failed, time sync disabled");
+        vTaskDelete(NULL);
+        return;
+    }
+    ESP_LOGI(TAG, "time_sync ready: send 'SETTIME YYYY-MM-DD HH:MM:SS' over USB");
+
+    char line[64];
+    size_t len = 0;
+    uint8_t ch;
+    while (1) {
+        if (usb_serial_jtag_read_bytes(&ch, 1, portMAX_DELAY) <= 0) {
+            continue;
+        }
+        if (ch == '\r') {
+            continue;
+        }
+        if (ch == '\n') {
+            line[len] = '\0';
+            len = 0;
+
+            int y, mo, d, h, mi, s;
+            if (sscanf(line, "SETTIME %d-%d-%d %d:%d:%d", &y, &mo, &d, &h, &mi, &s) == 6 &&
+                y >= 2000 && y <= 2099 && mo >= 1 && mo <= 12 && d >= 1 && d <= 31 &&
+                h >= 0 && h <= 23 && mi >= 0 && mi <= 59 && s >= 0 && s <= 59) {
+                esp_err_t ret = rtc_pcf85063_set_datetime(y % 100, mo, d, day_of_week(y, mo, d), h, mi, s);
+                if (ret == ESP_OK) {
+                    uint8_t hh, mm, ss, dd, wd, mo2, yy2;
+                    if (rtc_pcf85063_get_datetime(&hh, &mm, &ss, &dd, &wd, &mo2, &yy2) == ESP_OK) {
+                        ESP_LOGI(TAG, "RTC SET OK: %s 20%02d-%02d-%02d %02d:%02d:%02d",
+                                 weekdays_str[wd], yy2, mo2, dd, hh, mm, ss);
+                    }
+                } else {
+                    ESP_LOGE(TAG, "RTC set failed: %s", esp_err_to_name(ret));
+                }
+            }
+            continue;
+        }
+        if (len < sizeof(line) - 1) {
+            line[len++] = (char)ch;
+        }
+    }
 }
 
 static void pmic_init(void)
@@ -811,4 +903,5 @@ void app_main(void)
     lcd_init();           /* Initialize LCD + LVGL */
 
     xTaskCreate(gui_task, "gui_task", 4096 * 2, NULL, 5, NULL);
+    xTaskCreate(time_sync_task, "time_sync", 4096, NULL, 5, NULL);
 }
