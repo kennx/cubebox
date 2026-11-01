@@ -52,8 +52,8 @@ void bsp_lcd_set_brightness_raw(uint8_t pct);
  */
 void bsp_lcd_restore_user_brightness(void);
 
-/* 低功耗亮度（≈10/255，待真机标定后调整） */
-#define BSP_LCD_BRIGHTNESS_LOW_PCT 4
+/* 低功耗亮度：2026-11-01 真机标定（15% 不可见 / 18% 可见），如环境变化可再调 */
+#define BSP_LCD_BRIGHTNESS_LOW_PCT 18
 
 /**
  * @brief 请求一次屏幕截图（任意任务可调用；经 USB-Serial/JTAG 流式输出）

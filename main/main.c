@@ -160,6 +160,13 @@ static void time_sync_task(void *arg)
                 }
             } else if (strcmp(line, "KBDDUMP") == 0) {
                 s_kbd_dbg_cmd = KBD_CMD_DUMP;
+            } else if (strncmp(line, "BRIGHT ", 7) == 0) {
+                /* BRIGHT <1-100>：直接设背光（标定低功耗可见阈值用，不落 NVS） */
+                int v = 0;
+                if (sscanf(line + 7, "%d", &v) == 1 && v >= 1 && v <= 100) {
+                    bsp_lcd_set_backlight((uint8_t)v);
+                    ESP_LOGI(TAG, "backlight set to %d%%", v);
+                }
             }
             continue;
         }
