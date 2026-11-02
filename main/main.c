@@ -102,9 +102,80 @@ static battlog_entry_t s_battlog[BATTLOG_MAX_ENTRIES];
 static volatile uint16_t s_battlog_head = 0;   /* 下一条写入位置 */
 static volatile uint16_t s_battlog_count = 0;
 
+/* 低电量快照：掉电前把日志落 NVS（分析"放到没电"的尾段数据），开机自动恢复后清除。
+ * >20% 不写（省 NVS 磨损），20% 以下每 30min、10% 以下每 5min 快照一次 */
+#define BATTLOG_SNAP_NS        "battlog"
+#define BATTLOG_SNAP_KEYS      4     /* 4 片 × 256 条 × 8B = 8KB，NVS 单 blob 限 4KB 内 */
+#define BATTLOG_SNAP_HI_PCT    20
+#define BATTLOG_SNAP_HI_MIN    30
+#define BATTLOG_SNAP_LO_PCT    10
+#define BATTLOG_SNAP_LO_MIN    5
+
+static void battlog_snapshot_save(void)
+{
+    nvs_handle_t h;
+    if (nvs_open(BATTLOG_SNAP_NS, NVS_READWRITE, &h) != ESP_OK) {
+        return;
+    }
+    uint16_t n = s_battlog_count;
+    uint16_t start = (n == BATTLOG_MAX_ENTRIES) ? s_battlog_head : 0;
+    static battlog_entry_t chunk[BATTLOG_MAX_ENTRIES / BATTLOG_SNAP_KEYS];
+    uint16_t src = 0;
+    for (int k = 0; k < BATTLOG_SNAP_KEYS; k++) {
+        for (int i = 0; i < BATTLOG_MAX_ENTRIES / BATTLOG_SNAP_KEYS; i++) {
+            if (src < n) {
+                chunk[i] = s_battlog[(start + src) % BATTLOG_MAX_ENTRIES];
+                src++;
+            } else {
+                memset(&chunk[i], 0, sizeof(chunk[i])); /* 尾部零填充 */
+            }
+        }
+        char key[8];
+        snprintf(key, sizeof(key), "snap%d", k);
+        nvs_set_blob(h, key, chunk, sizeof(chunk));
+    }
+    nvs_commit(h);
+    nvs_close(h);
+}
+
+static void battlog_snapshot_restore(void)
+{
+    nvs_handle_t h;
+    if (nvs_open(BATTLOG_SNAP_NS, NVS_READWRITE, &h) != ESP_OK) {
+        return; /* 无快照 */
+    }
+    uint16_t count = 0;
+    bool any = false;
+    for (int k = 0; k < BATTLOG_SNAP_KEYS; k++) {
+        char key[8];
+        snprintf(key, sizeof(key), "snap%d", k);
+        static battlog_entry_t chunk[BATTLOG_MAX_ENTRIES / BATTLOG_SNAP_KEYS];
+        size_t len = 0;
+        if (nvs_get_blob(h, key, chunk, &len) != ESP_OK || len != sizeof(chunk)) {
+            continue;
+        }
+        any = true;
+        for (int i = 0; i < BATTLOG_MAX_ENTRIES / BATTLOG_SNAP_KEYS; i++) {
+            if (chunk[i].vbat_mv == 0) {
+                break; /* 零填充尾 */
+            }
+            s_battlog[count++] = chunk[i];
+        }
+    }
+    if (any) {
+        nvs_erase_all(h); /* 恢复一次即清，防止陈旧快照反复覆盖新数据 */
+        nvs_commit(h);
+        s_battlog_count = (count >= BATTLOG_MAX_ENTRIES) ? BATTLOG_MAX_ENTRIES : count;
+        s_battlog_head = count % BATTLOG_MAX_ENTRIES; /* 恢复为连续存储，环形写位置接着走 */
+        ESP_LOGI(TAG, "BL restored %u entries from NVS snapshot", count);
+    }
+    nvs_close(h);
+}
+
 static void batt_log_task(void *arg)
 {
     (void)arg;
+    uint32_t last_snap_ms = 0;
     while (1) {
         bsp_power_batt_info_t b;
         if (bsp_power_get_battery_info(&b) == ESP_OK) {
@@ -118,6 +189,17 @@ static void batt_log_task(void *arg)
             s_battlog_head = (uint16_t)((idx + 1) % BATTLOG_MAX_ENTRIES);
             if (s_battlog_count < BATTLOG_MAX_ENTRIES) {
                 s_battlog_count++;
+            }
+
+            /* 电池放电到低位时周期性落 NVS 快照（插着 USB 不写） */
+            uint32_t now_ms = xTaskGetTickCount() * portTICK_PERIOD_MS;
+            bool low = b.pct <= BATTLOG_SNAP_LO_PCT;
+            bool mid = b.pct <= BATTLOG_SNAP_HI_PCT;
+            uint32_t interval_min = low ? BATTLOG_SNAP_LO_MIN : BATTLOG_SNAP_HI_MIN;
+            if (!b.vbus_present && (low || mid) &&
+                (last_snap_ms == 0 || now_ms - last_snap_ms >= interval_min * 60000U)) {
+                battlog_snapshot_save();
+                last_snap_ms = now_ms;
             }
         }
         vTaskDelay(pdMS_TO_TICKS(BATTLOG_INTERVAL_S * 1000));
@@ -357,6 +439,9 @@ void app_main(void)
         err = nvs_flash_init();
     }
     ESP_ERROR_CHECK(err);
+
+    /* 恢复上次掉电前保存的电池日志快照（若有；见 battlog_snapshot_*） */
+    battlog_snapshot_restore();
 
     /* Shared I2C bus: AXP2101 / PCF85063 / 触摸（后续） */
     i2c_master_bus_config_t bus_cfg = {

@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
 """CubeBox 电池放电斜率工具（配合固件 BATT / BATTLOG 命令）。
 
-固件侧每 60s 把 电池% + 电压mV + 标志 写入 RAM 环形缓冲（重启即失，~17h 容量）：
+固件侧每 60s 把 电池% + 电压mV + 标志 写入 RAM 环形缓冲（~17h 容量）：
   flags: bit0=低功耗 bit1=VBUS在位 bit2=充电中
+电量 ≤20%（每 30min）/ ≤10%（每 5min）时自动快照落 NVS，掉电后开机自动恢复——
+"放到没电"测试的尾段数据在插回充电后仍可 DUMP 导出。
 
 用法（用系统 python，需要 pyserial）：
   python3 tools/battlog.py -p /dev/ttyACM0 --batt            # 即时读一次
@@ -86,16 +88,17 @@ def cmd_dump(ser, args):
           f"  电量 {entries[0][1]}% -> {entries[-1][1]}%"
           f"  电压 {entries[0][2]}mV -> {entries[-1][2]}mV")
 
-    # 只取放电段（VBUS 不在位）的连续片段
+    # 只取放电段（VBUS 不在位）的连续片段；uptime 回退（掉电重启/快照恢复）也切段
     runs = []
     run = []
     for e in entries:
-        if (e[3] & 2) == 0:
+        time_regressed = run and e[0] < run[-1][0]
+        if (e[3] & 2) == 0 and not time_regressed:
             run.append(e)
         else:
             if len(run) >= 2:
                 runs.append(run)
-            run = []
+            run = [e] if (e[3] & 2) == 0 else []
     if len(run) >= 2:
         runs.append(run)
 
