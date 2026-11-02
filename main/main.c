@@ -86,6 +86,44 @@ static void gui_handle_kbd_debug(void)
     }
 }
 
+/* 电池放电日志：RAM 环形缓冲自记录（拔线放电时 USB 断开，插回后 BATTLOG DUMP 导出）。
+ * 重启即失；采样固定 60s 一条，1024 条 ≈ 17 小时 */
+#define BATTLOG_INTERVAL_S   60
+#define BATTLOG_MAX_ENTRIES  1024
+
+typedef struct {
+    uint32_t uptime_s;
+    uint8_t pct;
+    uint16_t vbat_mv;
+    uint8_t flags;   /* bit0=低功耗 bit1=VBUS在位 bit2=充电中 */
+} battlog_entry_t;
+
+static battlog_entry_t s_battlog[BATTLOG_MAX_ENTRIES];
+static volatile uint16_t s_battlog_head = 0;   /* 下一条写入位置 */
+static volatile uint16_t s_battlog_count = 0;
+
+static void batt_log_task(void *arg)
+{
+    (void)arg;
+    while (1) {
+        bsp_power_batt_info_t b;
+        if (bsp_power_get_battery_info(&b) == ESP_OK) {
+            uint16_t idx = s_battlog_head;
+            s_battlog[idx].uptime_s = (uint32_t)(xTaskGetTickCount() * portTICK_PERIOD_MS / 1000);
+            s_battlog[idx].pct = b.pct;
+            s_battlog[idx].vbat_mv = b.vbat_mv;
+            s_battlog[idx].flags = (s_low_power ? 1U : 0U) |
+                                   (b.vbus_present ? 2U : 0U) |
+                                   (b.charging ? 4U : 0U);
+            s_battlog_head = (uint16_t)((idx + 1) % BATTLOG_MAX_ENTRIES);
+            if (s_battlog_count < BATTLOG_MAX_ENTRIES) {
+                s_battlog_count++;
+            }
+        }
+        vTaskDelay(pdMS_TO_TICKS(BATTLOG_INTERVAL_S * 1000));
+    }
+}
+
 /* 无头复现用户流程：设置页 → WiFi 页扫描 → 点行 0（应弹键盘），逐步打点定位死锁 */
 static void gui_handle_uitest(void)
 {
@@ -191,6 +229,33 @@ static void time_sync_task(void *arg)
                     bsp_lcd_set_backlight((uint8_t)v);
                     ESP_LOGI(TAG, "backlight set to %d%%", v);
                 }
+            } else if (strcmp(line, "BATT") == 0) {
+                /* BATT：即时读电池状态（电量/电压/供电/充电），寄存器见 bsp_power.h */
+                bsp_power_batt_info_t b;
+                if (bsp_power_get_battery_info(&b) == ESP_OK) {
+                    ESP_LOGI(TAG, "BATT pct=%u vbat=%umV vbus=%d chg=%d st=0x%02X lp=%d",
+                             b.pct, b.vbat_mv, b.vbus_present, b.charging, b.raw_status,
+                             s_low_power);
+                } else {
+                    ESP_LOGE(TAG, "BATT read failed");
+                }
+            } else if (strcmp(line, "BATTLOG DUMP") == 0) {
+                /* 导出 RAM 放电日志；行格式 "BL <uptime_s> <pct> <mV> <flags>"。
+                 * 注意：仅放电段（flags bit1=0）参与斜率计算，插回 USB 会开始充电 */
+                uint16_t n = s_battlog_count;
+                uint16_t start = (n == BATTLOG_MAX_ENTRIES) ? s_battlog_head : 0;
+                ESP_LOGI(TAG, "BL HEAD n=%u", n);
+                for (uint16_t i = 0; i < n; i++) {
+                    const battlog_entry_t *e = &s_battlog[(start + i) % BATTLOG_MAX_ENTRIES];
+                    ESP_LOGI(TAG, "BL %u %u %u %u",
+                             (unsigned)e->uptime_s, (unsigned)e->pct,
+                             (unsigned)e->vbat_mv, (unsigned)e->flags);
+                }
+                ESP_LOGI(TAG, "BL END n=%u", n);
+            } else if (strcmp(line, "BATTLOG CLEAR") == 0) {
+                s_battlog_head = 0;
+                s_battlog_count = 0;
+                ESP_LOGI(TAG, "BL cleared");
             } else if (strcmp(line, "TPTEST") == 0) {
                 bsp_touch_debug_poll(10);
             } else if (strcmp(line, "UITEST") == 0) {
@@ -314,4 +379,5 @@ void app_main(void)
 
     xTaskCreate(gui_task, "gui_task", 4096 * 2, NULL, 5, NULL);
     xTaskCreate(time_sync_task, "time_sync", 4096, NULL, 5, NULL);
+    xTaskCreate(batt_log_task, "batt_log", 3072, NULL, 4, NULL); /* 电池放电自记录 */
 }

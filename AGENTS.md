@@ -141,6 +141,8 @@ idf.py set-target esp32c6
   - `REBOOT`：远程重启（抓完整启动日志用）。
   - `PAGE CLOCK|SETTINGS|WIFI`：无触指环境远程切页验证。
   - `WSCAN` / `WCONNECT <ssid> [password]`：WiFi 扫描/连接对时（单参数=用 NVS 保存凭据，`-`=开放网络）。
+  - `BATT`：即时读电池（电量%/电压mV/VBUS/充电状态，AXP2101 0xA4 + 0x34/35 + 0x00 + 0x01）。
+  - `BATTLOG DUMP|CLEAR` + `tools/battlog.py -p PORT --dump`：电池放电斜率测量。固件每 60s 自记录到 RAM 环形缓冲（~17h 容量，**重启即失**）；拔线放电后插回**先 DUMP 再做其他操作**，脚本按放电段（VBUS=0）算 %/h → mA → 预计续航。
   - `KBD` / `KBDMOCK <n>` / `KBDDUMP`：T9 键盘布局与多击逻辑注入测试。
 - **验证要求**：
   - 完成功能后，必须执行构建验证：`idf.py build`

@@ -20,6 +20,10 @@
 #define AXP2101_LDO_VOL2_CTRL       0x94
 #define AXP2101_LDO_VOL3_CTRL       0x95
 #define AXP2101_BAT_PERCENT_REG     0xA4
+#define AXP2101_PWR_STATUS0         0x00
+#define AXP2101_CHARGE_STATUS       0x01
+#define AXP2101_VBAT_H8             0x34
+#define AXP2101_VBAT_L8             0x35
 
 static i2c_master_dev_handle_t axp2101_dev = NULL;
 
@@ -72,6 +76,42 @@ esp_err_t bsp_power_get_battery_pct(uint8_t *pct)
         *pct = 99;
     }
     return ret;
+}
+
+esp_err_t bsp_power_get_battery_info(bsp_power_batt_info_t *info)
+{
+    if (info == NULL) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    if (axp2101_dev == NULL) {
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    uint8_t pct = 0, vh = 0, vl = 0, st0 = 0, st1 = 0;
+    esp_err_t ret = axp2101_read_reg(AXP2101_BAT_PERCENT_REG, &pct);
+    if (ret == ESP_OK) {
+        ret = axp2101_read_reg(AXP2101_VBAT_H8, &vh);
+    }
+    if (ret == ESP_OK) {
+        ret = axp2101_read_reg(AXP2101_VBAT_L8, &vl);
+    }
+    if (ret == ESP_OK) {
+        ret = axp2101_read_reg(AXP2101_PWR_STATUS0, &st0);
+    }
+    if (ret == ESP_OK) {
+        ret = axp2101_read_reg(AXP2101_CHARGE_STATUS, &st1);
+    }
+    if (ret != ESP_OK) {
+        return ret;
+    }
+
+    info->pct = (pct > 100) ? 100 : pct;
+    /* 4036mV 实测为 0x0F/0xC4：14-bit，1mV/LSB */
+    info->vbat_mv = (uint16_t)(((vh & 0x3F) << 8) | vl);
+    info->vbus_present = (st0 & 0x20) != 0;
+    info->charging = (st1 & 0x07) != 0x07; /* 充电中低 3 位 != 111（电池供电实测 0x37） */
+    info->raw_status = st1;
+    return ESP_OK;
 }
 
 void bsp_power_init(i2c_master_bus_handle_t bus)
