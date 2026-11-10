@@ -13,6 +13,18 @@ add_executable(test_apps
 )
 
 target_include_directories(test_apps PRIVATE ../main)
-target_compile_options(test_apps PRIVATE -Wall -Werror)
+target_compile_options(test_apps PRIVATE -Wall -Werror -fsanitize=address,undefined)
+target_link_options(test_apps PRIVATE -fsanitize=address,undefined)
 
 add_test(NAME test_apps COMMAND test_apps)
+
+add_executable(test_dotmatrix
+    test_dotmatrix.c
+    ../main/apps/common/dotmatrix/dotmatrix.c
+)
+
+target_include_directories(test_dotmatrix PRIVATE ../main)
+target_compile_options(test_dotmatrix PRIVATE -Wall -Werror -fsanitize=address,undefined)
+target_link_options(test_dotmatrix PRIVATE -fsanitize=address,undefined)
+
+add_test(NAME test_dotmatrix COMMAND test_dotmatrix)
