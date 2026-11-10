@@ -19,11 +19,6 @@
 #define AXP2101_LDO_VOL1_CTRL       0x93
 #define AXP2101_LDO_VOL2_CTRL       0x94
 #define AXP2101_LDO_VOL3_CTRL       0x95
-#define AXP2101_BAT_PERCENT_REG     0xA4
-#define AXP2101_PWR_STATUS0         0x00
-#define AXP2101_CHARGE_STATUS       0x01
-#define AXP2101_VBAT_H8             0x34
-#define AXP2101_VBAT_L8             0x35
 
 static i2c_master_dev_handle_t axp2101_dev = NULL;
 
@@ -56,64 +51,6 @@ static void axp2101_clr_bit(uint8_t reg, uint8_t bit)
     }
 }
 
-esp_err_t bsp_power_get_battery_pct(uint8_t *pct)
-{
-    if (pct == NULL) {
-        return ESP_ERR_INVALID_ARG;
-    }
-    if (axp2101_dev == NULL) {
-        return ESP_ERR_INVALID_STATE;
-    }
-    uint8_t val = 0;
-    esp_err_t ret = axp2101_read_reg(AXP2101_BAT_PERCENT_REG, &val);
-    if (ret == ESP_OK) {
-        if (val > 100) {
-            val = 100;
-        }
-        *pct = val;
-    } else {
-        ESP_LOGW(TAG, "Battery read failed (%s), falling back to 99%%", esp_err_to_name(ret));
-        *pct = 99;
-    }
-    return ret;
-}
-
-esp_err_t bsp_power_get_battery_info(bsp_power_batt_info_t *info)
-{
-    if (info == NULL) {
-        return ESP_ERR_INVALID_ARG;
-    }
-    if (axp2101_dev == NULL) {
-        return ESP_ERR_INVALID_STATE;
-    }
-
-    uint8_t pct = 0, vh = 0, vl = 0, st0 = 0, st1 = 0;
-    esp_err_t ret = axp2101_read_reg(AXP2101_BAT_PERCENT_REG, &pct);
-    if (ret == ESP_OK) {
-        ret = axp2101_read_reg(AXP2101_VBAT_H8, &vh);
-    }
-    if (ret == ESP_OK) {
-        ret = axp2101_read_reg(AXP2101_VBAT_L8, &vl);
-    }
-    if (ret == ESP_OK) {
-        ret = axp2101_read_reg(AXP2101_PWR_STATUS0, &st0);
-    }
-    if (ret == ESP_OK) {
-        ret = axp2101_read_reg(AXP2101_CHARGE_STATUS, &st1);
-    }
-    if (ret != ESP_OK) {
-        return ret;
-    }
-
-    info->pct = (pct > 100) ? 100 : pct;
-    /* 4036mV 实测为 0x0F/0xC4：14-bit，1mV/LSB */
-    info->vbat_mv = (uint16_t)(((vh & 0x3F) << 8) | vl);
-    info->vbus_present = (st0 & 0x20) != 0;
-    info->charging = (st1 & 0x07) != 0x07; /* 充电中低 3 位 != 111（电池供电实测 0x37） */
-    info->raw_status = st1;
-    return ESP_OK;
-}
-
 void bsp_power_init(i2c_master_bus_handle_t bus)
 {
     i2c_device_config_t dev_cfg = {
@@ -144,39 +81,16 @@ void bsp_power_init(i2c_master_bus_handle_t bus)
     ldo_onoff1 &= ~0x03;
     ESP_ERROR_CHECK(axp2101_write_reg(AXP2101_LDO_ONOFF_CTRL1, ldo_onoff1));
 
-    /* Verify registers */
-    uint8_t dc_onoff, dc_vol, ldo_vol0, ldo_vol3;
-    axp2101_read_reg(AXP2101_DC_ONOFF_DVM_CTRL, &dc_onoff);
-    axp2101_read_reg(AXP2101_DC_VOL0_CTRL, &dc_vol);
-    axp2101_read_reg(AXP2101_LDO_VOL0_CTRL, &ldo_vol0);
-    axp2101_read_reg(AXP2101_LDO_VOL3_CTRL, &ldo_vol3);
-    axp2101_read_reg(AXP2101_LDO_ONOFF_CTRL0, &ldo_onoff);
-    axp2101_read_reg(AXP2101_LDO_ONOFF_CTRL1, &ldo_onoff1);
-    ESP_LOGI(TAG, "PMIC verify: DC_ONOFF=0x%02X DC_VOL=0x%02X LDO0_VOL=0x%02X LDO3_VOL=0x%02X LDO_ONOFF=0x%02X LDO_ONOFF1=0x%02X",
-             dc_onoff, dc_vol, ldo_vol0, ldo_vol3, ldo_onoff, ldo_onoff1);
-
     ESP_LOGI(TAG, "PMIC initialized");
 }
 
 void bsp_power_lcd_reset(void)
 {
-    uint8_t val;
     /* High-Low-High reset sequence (match official Waveshare code) */
-    axp2101_read_reg(AXP2101_LDO_ONOFF_CTRL0, &val);
-    ESP_LOGI(TAG, "ALDO3 before reset: 0x%02X (bit2=%d)", val, (val >> 2) & 1);
-
     axp2101_set_bit(AXP2101_LDO_ONOFF_CTRL0, 2);  /* Power on */
     vTaskDelay(pdMS_TO_TICKS(100));
-    axp2101_read_reg(AXP2101_LDO_ONOFF_CTRL0, &val);
-    ESP_LOGI(TAG, "ALDO3 after power on: 0x%02X (bit2=%d)", val, (val >> 2) & 1);
-
     axp2101_clr_bit(AXP2101_LDO_ONOFF_CTRL0, 2);  /* Reset */
     vTaskDelay(pdMS_TO_TICKS(100));
-    axp2101_read_reg(AXP2101_LDO_ONOFF_CTRL0, &val);
-    ESP_LOGI(TAG, "ALDO3 after reset: 0x%02X (bit2=%d)", val, (val >> 2) & 1);
-
     axp2101_set_bit(AXP2101_LDO_ONOFF_CTRL0, 2);  /* Release reset */
     vTaskDelay(pdMS_TO_TICKS(100));
-    axp2101_read_reg(AXP2101_LDO_ONOFF_CTRL0, &val);
-    ESP_LOGI(TAG, "ALDO3 after release: 0x%02X (bit2=%d)", val, (val >> 2) & 1);
 }

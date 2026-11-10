@@ -12,41 +12,21 @@
 - 保持修改聚焦。不要顺带进行无关重构。
 - **嵌入式优先**：始终考虑内存占用、功耗和硬件约束。ESP32-C6 仅有 512 KB HP SRAM，避免堆碎片化和动态分配。
 - **AMOLED 屏约束**：本设备使用 480×480 AMOLED（16.7M 色），对比度极高、响应极快。支持动画和复杂 UI，但需权衡功耗；避免无意义的全屏重绘，利用 `lv_obj_invalidate` 做局部刷新以节省算力。
-- **总线独占意识**：LCD（QSPI 4-bit）与 TF 卡（SDSPI 1-bit）共享 CLK/MOSI/MISO。访问 TF 卡前必须上拉 LCD CS（GPIO 15）、拉低 SD CS（GPIO 6），使用完毕后恢复。
+- **总线独占意识**：LCD（QSPI 4-bit）与 TF 卡（SDSPI 1-bit）共享 CLK/MOSI/MISO。访问 TF 卡前必须上拉 LCD CS（GPIO 15）、拉低 SD CS（GPIO 6），使用完毕后恢复；开机时 `app_main` 已上拉 TF CS 释放总线给 LCD。
 
 ## 项目地图
 
-- `main/main.c`：当前唯一的应用程序源文件。包含 PMIC（AXP2101）、RTC（PCF85063）、LCD（SH8601 QSPI）初始化、LVGL 显示驱动与主 UI 任务。
+- `main/main.c`：app_main 初始化顺序（TF CS 释放、I2C 总线、PMIC、LCD）、gui_task（黑底白字居中「OK」）、USB 调试 console 任务（SNAP/REBOOT 命令）。
+- `main/bsp_power.c`：AXP2101：PMIC 初始化、ALDO3 屏复位时序（屏复位无独立 RST GPIO）。
+- `main/bsp_lcd.c`：QSPI 面板、LVGL 显示驱动、flush_cb（swap_buf 隔离 + 截图流式输出）、背光（0x51 命令）。
 - `main/CMakeLists.txt`：主组件构建配置。新增源文件或依赖时必须修改。
 - `main/idf_component.yml`：IDF 组件管理器清单。当前依赖 `espressif/esp_lcd_sh8601` 与 `lvgl/lvgl`。
-- `docs/features/`：功能需求与说明文档
-- `docs/hardwares/`：硬件规格与参考文档
-- `docs/issues/`：已知问题与排障记录
-- `docs/superpowers/`：设计规格与实现计划
-  - `plans/`：实现计划（如矩阵时钟重构计划）
-  - `specs/`：设计规格（如 Nothing Phone 风格点阵时钟设计）
-- `managed_components/`：IDF 组件管理器自动下载的依赖（如 `lvgl__lvgl`、`espressif__esp_lcd_sh8601`、`waveshare__esp_lcd_touch_cst9217`）。**对 Agent 只读**。
+- `docs/hardwares/`：硬件规格与参考文档。
+- `managed_components/`：IDF 组件管理器自动下载的依赖（如 `lvgl__lvgl`、`espressif__esp_lcd_sh8601`）。**对 Agent 只读**。
 - `sdkconfig` / `sdkconfig.defaults`：项目 Kconfig 配置。修改后需重新运行 `idf.py reconfigure`。
 - `partitions.csv`：Flash 分区表。当前包含 nvs、phy_init、factory（6M app）、storage（3M SPIFFS）。
 
-### main/ 模块地图（2026-11 设置页+WiFi 对时+低功耗重构后）
-
-| 模块 | 职责 |
-|------|------|
-| `main.c` | app_main 初始化顺序、i2c 总线创建、gui_task 主循环（走时+低功耗+导航+调试命令）、USB 控制台（SETTIME/SNAP/REBOOT/PAGE/WSCAN/WCONNECT/KBD 系列） |
-| `bsp_power.c` | AXP2101：PMIC 初始化、电量读取、ALDO3 屏复位 |
-| `bsp_rtc.c` | PCF85063：读写日期时间、星期算法 |
-| `bsp_lcd.c` | QSPI 面板、LVGL 显示驱动、flush_cb（含 CLOCK_OVERLAY/PASSTHROUGH 模式开关）、背光（0x51 命令 + NVS 用户亮度 + 低功耗 raw/restore）、截图流式输出 |
-| `bsp_touch.c` | CST9220 触摸（cst9217 组件）+ LVGL indev、最近触摸时间戳、唤醒吞点击；方向 flags 集中在文件顶部 3 个宏 |
-| `ui_clock.c` | 时钟页：点阵像素叠绘（flush 钩子）、上滑手势开设置页、每秒走时 |
-| `ui_settings.c` | 设置页：WiFi 行/亮度滑条/电量行、页面导航请求（ui_nav_*）、下滑返回 |
-| `ui_wifi.c` | WiFi 子页：扫描列表、连接分流（直连/弹键盘）、状态轮询 |
-| `ui_keyboard.c` | T9 九宫格密码键盘（多击/大小写/符号页） |
-| `app_wifi.c` | WiFi 管理器：懒初始化、扫描/连接/SNTP 对时状态机、NVS 凭据（8 槽按 SSID 去重）、对时后彻底 deinit |
-
-**关键约束**：所有 LVGL 调用仅限 gui_task 上下文；其他任务经 `ui_nav_request`/命令队列/`lv_timer` 轮询交接。WiFi/蓝牙绝不自动开启——`app_wifi_ensure_started()` 只在用户于 WiFi 页主动操作时调用。
-
-> 随着功能增长，代码应从 `main.c` 逐步拆分为 `components/` 或 `main/` 下的模块化文件（如 `bsp_power.c`、`bsp_lcd.c`、`ui_clock.c`）。拆分原则：一个文件聚焦一个子系统，避免 `main.c` 超过 800 行。
+> 随着功能增长，代码应从 `main.c` 逐步拆分为 `main/` 下的模块化文件（如 `bsp_power.c`、`bsp_lcd.c`）。拆分原则：一个文件聚焦一个子系统，避免 `main.c` 超过 800 行。
 
 ## 环境要求
 
@@ -102,10 +82,10 @@ idf.py set-target esp32c6
   | ES7210 | 0x40 | 回声消除 ADC |
   | QMI8658 | 0x6A | IMU 惯性传感器（SA0 接地） |
   | PCF85063 | 0x51 | RTC 实时时钟（由 AXP2101 电池备份供电） |
-  | CST9220 | 0x5A | 电容触摸控制器（代码中驱动使用 CST9217 库） |
+  | CST9220 | 0x5A | 电容触摸控制器 |
 - **屏幕与触摸**：
   - 板载 2.16 英寸 480×480 高清 AMOLED 屏，驱动 IC 为 CO5300（代码中兼容并常用 `esp_lcd_sh8601` QSPI 驱动）。
-  - 电容触控芯片为 CST9220（代码驱动使用 `esp_lcd_touch_cst9217`，I2C 通信）。
+  - 电容触控芯片为 CST9220（I2C 通信；当前固件未启用触摸驱动）。
   - 屏幕背光通过发送命令 `0x51` 调节亮度，无独立 GPIO 控制。
   - 显示屏复位由 AXP2101 ALDO3 控制电源复位，无独立 RST GPIO。
 - **QSPI / SPI 冲突**：LCD（QSPI，4-bit）与 TF 卡（SDSPI，1-bit）共享 CLK/MOSI/MISO GPIO，两者不能同时以最高性能传输，需由软件控制 CS 切换总线访问。典型做法：初始化时上拉 TF CS（GPIO 6）释放总线给 LCD。
@@ -113,7 +93,7 @@ idf.py set-target esp32c6
 - **LVGL 使用规范**：
   - 当前使用 LVGL v8.x。遵循其对象模型，优先使用 `lv_obj_set_style_xxx` 做样式控制。
   - 避免每帧全屏 `lv_obj_invalidate(lv_scr_act())`，改为仅标记变化区域。
-  - **例外**：`gui_task` 中的 `lv_obj_invalidate(lv_scr_act())` 是 `lvgl_flush_cb` 像素拦截架构的必要代价。LVGL 不知道手写点阵时钟和状态栏的像素覆盖，因此必须强制全屏 flush 以确保自定义像素被重新计算。这是已知功耗权衡，已通过每秒 1 次刷新将频率降到最低。
+  - **例外**：gui_task 中截图请求触发的一次性 `lv_obj_invalidate(lv_scr_act())` 是 `flush_cb` 截图流架构的必要代价（需强制全屏 flush 让 flush_cb 流出所有条带）。
   - 显示刷新缓冲区大小由 `LCD_WIDTH * 40 * sizeof(lv_color_t)` 定义，修改时需确保 DMA 容量和总线带宽匹配。
 - **如果写了 200 行而 50 行就能解决，重写它。**
 
@@ -130,20 +110,11 @@ idf.py set-target esp32c6
   - body 中按文件或功能分组，说明改了什么、为什么改、影响范围。
   - 修复 bug 需说明根因；架构决策需简要说明理由。
 - **文件读取**：如果 **rg** 可用，优先使用 `rg` / `rg --files`。
-- **代码修改前**：先阅读相关源码和最近的约束文档；设计变更时，优先遵循现有边界和本地模式。
-- **烧录与 RTC 对时**：
-  - 日常开发使用 `tools/flash.sh [PORT]` 一键完成编译、烧录，并自动把电脑本机时间写入 PCF85063 RTC（复位设备 → 等 `time_sync ready` → 发送 `SETTIME YYYY-MM-DD HH:MM:SS` → 校验读回偏差 ≤1s）。
-  - 仅对时不烧录：`tools/sync_rtc.py --port /dev/cu.usbmodem1101`（需 pyserial，建议在 IDF 环境下运行）。
-  - 设备脱离电脑对时：设置页 → WiFi → 选网络（有保存密码直连，否则 T9 键盘输入）→ 自动 SNTP 对时并断开。
-  - 固件侧由 `main.c` 的 `time_sync_task` 经 USB-Serial/JTAG 辅助 console 接收命令；主 console 是 UART0，stdin 收不到 USB 数据，不要改用 stdin 读取。
-- **远程调试（USB 控制台命令，同一辅助 console 通道）**：
-  - `SNAP` + `tools/screenshot.py -p PORT -o shot.png`：抓取屏幕 PNG（含点阵叠绘的最终像素；用系统 python 跑，IDF venv 缺 Pillow）。
+- **代码修改前**：先阅读相关源码和最新的约束文档；设计变更时，优先遵循现有边界和本地模式。
+- **烧录**：日常开发使用 `tools/flash.sh [PORT]` 一键完成编译、烧录。
+- **远程调试（USB 控制台命令，`main.c` 的 console 任务经 USB-Serial/JTAG 辅助 console 接收；主 console 是 UART0，stdin 收不到 USB 数据，不要改用 stdin 读取）**：
+  - `SNAP` + `tools/screenshot.py -p PORT -o shot.png`：抓取屏幕 PNG（用系统 python 跑，IDF venv 缺 Pillow）。
   - `REBOOT`：远程重启（抓完整启动日志用）。
-  - `PAGE CLOCK|SETTINGS|WIFI`：无触指环境远程切页验证。
-  - `WSCAN` / `WCONNECT <ssid> [password]`：WiFi 扫描/连接对时（单参数=用 NVS 保存凭据，`-`=开放网络）。
-  - `BATT`：即时读电池（电量%/电压mV/VBUS/充电状态，AXP2101 0xA4 + 0x34/35 + 0x00 + 0x01）。
-  - `BATTLOG DUMP|CLEAR` + `tools/battlog.py -p PORT --dump`：电池放电斜率测量。固件每 60s 自记录到 RAM 环形缓冲（~17h 容量，**重启即失**）；拔线放电后插回**先 DUMP 再做其他操作**，脚本按放电段（VBUS=0）算 %/h → mA → 预计续航。
-  - `KBD` / `KBDMOCK <n>` / `KBDDUMP`：T9 键盘布局与多击逻辑注入测试。
 - **验证要求**：
   - 完成功能后，必须执行构建验证：`idf.py build`
   - 若进行了配置变更或依赖变更，执行完整清理构建：`idf.py fullclean && idf.py build`

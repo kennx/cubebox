@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# 一键：编译 + 烧录 + 自动把电脑本机时间同步到 PCF85063 RTC
+# 一键：编译 + 烧录
 # 用法：tools/flash.sh [PORT]   （默认自动探测 /dev/ttyACM* 或 /dev/cu.usbmodem*）
 set -euo pipefail
 
@@ -24,8 +24,3 @@ fi
 
 cd "$PROJECT_DIR"
 idf.py -p "$PORT" build flash
-
-# 烧录后 esptool 硬复位设备，USB-Serial/JTAG 会重新枚举，串口节点短暂失效
-sleep 3
-# 同步脚本会再次复位以对齐 time_sync 就绪横幅
-python "$SCRIPT_DIR/sync_rtc.py" --port "$PORT"

@@ -13,11 +13,8 @@
 #include "lvgl.h"
 #include "esp_timer.h"
 #include <esp_heap_caps.h>
-#include <nvs_flash.h>
-#include <nvs.h>
 #include "bsp_lcd.h"
 #include "bsp_power.h"
-#include "ui_clock.h"
 
 #define TAG "bsp_lcd"
 
@@ -34,60 +31,6 @@
 
 static esp_lcd_panel_io_handle_t lcd_io = NULL;
 static esp_lcd_panel_handle_t lcd_panel = NULL;
-
-static bsp_lcd_flush_mode_t s_flush_mode = BSP_LCD_FLUSH_CLOCK_OVERLAY;
-
-/* 用户亮度（NVS 持久化）；低功耗 dim 不修改该值 */
-static uint8_t s_brightness_pct = 100;
-
-void bsp_lcd_set_brightness_live(uint8_t pct)
-{
-    if (pct < 10) {
-        pct = 10;
-    }
-    if (pct > 100) {
-        pct = 100;
-    }
-    s_brightness_pct = pct;
-    bsp_lcd_set_backlight(pct);
-}
-
-void bsp_lcd_set_brightness_pct(uint8_t pct)
-{
-    bsp_lcd_set_brightness_live(pct);
-
-    nvs_handle_t nvs;
-    if (nvs_open("settings", NVS_READWRITE, &nvs) == ESP_OK) {
-        nvs_set_u8(nvs, "brightness", pct);
-        nvs_commit(nvs);
-        nvs_close(nvs);
-    }
-}
-
-uint8_t bsp_lcd_get_brightness_pct(void)
-{
-    return s_brightness_pct;
-}
-
-void bsp_lcd_set_brightness_raw(uint8_t pct)
-{
-    bsp_lcd_set_backlight(pct);
-}
-
-void bsp_lcd_restore_user_brightness(void)
-{
-    bsp_lcd_set_backlight(s_brightness_pct);
-}
-
-void bsp_lcd_set_flush_mode(bsp_lcd_flush_mode_t mode)
-{
-    s_flush_mode = mode;
-}
-
-bsp_lcd_flush_mode_t bsp_lcd_get_flush_mode(void)
-{
-    return s_flush_mode;
-}
 
 /* 截图调试：请求标志任意任务置位，活动状态仅 gui_task 上下文访问 */
 static volatile bool s_snap_req = false;
@@ -143,28 +86,10 @@ void bsp_lcd_set_backlight(uint8_t brightness)
 {
     uint8_t bl_val = (brightness * 255) / 100;
     uint32_t cmd = (0x02 << 24) | (0x51 << 8);
-    ESP_LOGD(TAG, "Setting backlight: brightness=%d, bl_val=0x%02X", brightness, bl_val);
     esp_err_t ret = esp_lcd_panel_io_tx_param(lcd_io, cmd, &bl_val, 1);
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "Backlight command failed: %s", esp_err_to_name(ret));
     }
-}
-
-static void lcd_diagnostic_fill(uint16_t color)
-{
-    static uint16_t line_buf[LCD_WIDTH * 20];
-    for (size_t i = 0; i < LCD_WIDTH * 20; i++) {
-        line_buf[i] = color;
-    }
-
-    for (int y = 0; y < LCD_HEIGHT; y += 20) {
-        esp_err_t ret = esp_lcd_panel_draw_bitmap(lcd_panel, 0, y, LCD_WIDTH, y + 20, line_buf);
-        if (ret != ESP_OK) {
-            ESP_LOGE(TAG, "Diagnostic fill failed at y=%d: %s", y, esp_err_to_name(ret));
-            return;
-        }
-    }
-    ESP_LOGI(TAG, "Diagnostic fill color=0x%04X completed", color);
 }
 
 static bool notify_lvgl_flush_ready(esp_lcd_panel_io_handle_t panel_io, esp_lcd_panel_io_event_data_t *edata, void *user_ctx)
@@ -177,7 +102,6 @@ static bool notify_lvgl_flush_ready(esp_lcd_panel_io_handle_t panel_io, esp_lcd_
 static void lvgl_flush_cb(lv_disp_drv_t *drv, const lv_area_t *area, lv_color_t *color_map)
 {
     esp_lcd_panel_handle_t panel_handle = (esp_lcd_panel_handle_t) drv->user_data;
-    static uint32_t flush_count = 0;
     int offsetx1 = area->x1;
     int offsetx2 = area->x2;
     int offsety1 = area->y1;
@@ -187,22 +111,16 @@ static void lvgl_flush_cb(lv_disp_drv_t *drv, const lv_area_t *area, lv_color_t 
     uint32_t height = offsety2 - offsety1 + 1;
     uint32_t size = width * height;
 
-    /* A static swap buffer with safe margin to isolate the big-endian pixel stream and prevent rounder-induced underflow */
+    /* A static swap buffer to isolate the big-endian pixel stream and prevent
+     * rounder-induced underflow. draw_bitmap 读取是异步的，期间 LVGL 可能复用
+     * 其绘制缓冲，因此必须先拷贝再送显 */
     static lv_color_t swap_buf[LCD_WIDTH * 60];
     if (size > LCD_WIDTH * 60) {
         ESP_LOGE(TAG, "Flush size too large: %lu, max: %d", size, LCD_WIDTH * 60);
         lv_disp_flush_ready(drv);
         return;
     }
-
-    /* 点阵时钟像素叠绘：在送显前对 swap_buf 做逐像素覆盖（仅时钟页模式）；
-     * 设置页模式纯透传，但仍要经 swap_buf 隔离（draw_bitmap 异步读取期间
-     * LVGL 可能复用其绘制缓冲） */
-    if (s_flush_mode == BSP_LCD_FLUSH_CLOCK_OVERLAY) {
-        ui_clock_overlay_apply(area, color_map, swap_buf);
-    } else {
-        memcpy(swap_buf, color_map, size * sizeof(lv_color_t));
-    }
+    memcpy(swap_buf, color_map, size * sizeof(lv_color_t));
 
     /* 截图调试：逐行流出最终送显像素（RGB565 hex，内存字节序）。
      * 每行一条 "#SNAP x1 y x2 y" + 该行 hex（≤1952B 单次写，防溢出），
@@ -235,11 +153,6 @@ static void lvgl_flush_cb(lv_disp_drv_t *drv, const lv_area_t *area, lv_color_t 
                  offsetx1, offsety1, offsetx2, offsety2, esp_err_to_name(ret));
         lv_disp_flush_ready(drv);
         return;
-    }
-    flush_count++;
-    if (flush_count <= 5 || flush_count % 60 == 0) {
-        ESP_LOGI(TAG, "LVGL flush #%lu area=(%d,%d)-(%d,%d) size=%lu",
-                 flush_count, offsetx1, offsety1, offsetx2, offsety2, size);
     }
 }
 
@@ -302,7 +215,6 @@ void bsp_lcd_init(void)
 
     ESP_LOGI(TAG, "Creating SH8601 panel...");
     esp_err_t ret = esp_lcd_new_panel_sh8601(lcd_io, &panel_config, &lcd_panel);
-    ESP_LOGI(TAG, "esp_lcd_new_panel_sh8601 result: %s", esp_err_to_name(ret));
     ESP_ERROR_CHECK(ret);
 
     ESP_LOGI(TAG, "Performing LCD power reset...");
@@ -310,29 +222,12 @@ void bsp_lcd_init(void)
 
     ESP_LOGI(TAG, "Initializing LCD panel...");
     ret = esp_lcd_panel_init(lcd_panel);
-    ESP_LOGI(TAG, "esp_lcd_panel_init result: %s", esp_err_to_name(ret));
     ESP_ERROR_CHECK(ret);
 
     ESP_LOGI(TAG, "Turning LCD display on...");
     ESP_ERROR_CHECK(esp_lcd_panel_disp_on_off(lcd_panel, true));
 
-    /* 应用 NVS 保存的用户亮度（首次启动默认 100） */
-    {
-        nvs_handle_t nvs;
-        if (nvs_open("settings", NVS_READONLY, &nvs) == ESP_OK) {
-            uint8_t saved = 100;
-            if (nvs_get_u8(nvs, "brightness", &saved) == ESP_OK) {
-                if (saved >= 10 && saved <= 100) {
-                    s_brightness_pct = saved;
-                }
-            }
-            nvs_close(nvs);
-        }
-    }
-    bsp_lcd_set_backlight(s_brightness_pct);
-    lcd_diagnostic_fill(0xFFFF);
-    vTaskDelay(pdMS_TO_TICKS(1000));
-    lcd_diagnostic_fill(0x0000);
+    bsp_lcd_set_backlight(100);
 
     ESP_LOGI(TAG, "LCD initialized");
 
