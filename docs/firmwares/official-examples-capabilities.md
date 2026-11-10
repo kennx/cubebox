@@ -54,7 +54,7 @@
 ### 4. IMU 六轴(QMI8658,`waveshare/qmi8658 ^1.0.1` 组件)
 
 - 地址 0x6A(`QMI8658_ADDRESS_HIGH`,SA0 接地),挂共享 I2C0。
-- 配置(02 示例):加速度 **±8g @1000Hz**、陀螺仪 **512dps @1000Hz**、单位 m/s² 与 rad/s、显示精度 4 位小数。
+- 配置(02 示例):加速度 **±8g @1000Hz**、陀螺仪 **512dps @1000Hz**、单位 m/s² 与 rad/s、`qmi8658_set_display_precision(4)` 设 4 位换算精度(注意:main 的日志 snprintf 用 `%.2f`,实际打印 2 位小数)。
 - 读取流程:500ms 轮询 `qmi8658_is_data_ready`(DRDY)→ `qmi8658_read_sensor_data` 得六轴浮点 → 日志打印。
 
 ### 5. RTC(PCF85063,`waveshare/pcf85063a ^1.1.1` 组件)
@@ -73,10 +73,10 @@
 
 - 链路:esp_codec_dev 框架,I2S **TDM** 模式(Philips,4 slot,32bit,默认 16kHz 起步);引脚来自 `board_cfg.txt` 的 `C6_AMOLED_2_16` 条目:**MCLK=19、BCLK=20、WS=22、DIN=21(麦克风入)、DOUT=23(扬声器出)**。
 - 播放:ES8311 @I2C 0x18(400kHz),无独立 PA GPIO(`pa:-1`),`CodecPort_SetSpeakerVol(0-100)`;录音:ES7210 @0x40,`CodecPort_SetMicGain(dB)`(示例 35.0)。
-- 07 示例流程:16kHz/2ch/16bit → "Recording" 录 **6 秒(192000 字节上限)**到 SPIFFS `/spiffs/rec.raw` → "Play Recording" 回放;"Play Music" 播放 SPIFFS 内 `mood.pcm`(构建时经 `spiffs_create_partition_image` 烧入 storage 分区)。
+- 07 示例流程:16kHz/2ch/16bit(64KB/s)→ "Recording" 录 **3 秒(192000 字节上限)**到 SPIFFS `/spiffs/rec.raw` → "Play Recording" 回放;"Play Music" 播放 SPIFFS 内 `mood.pcm`(构建时经 `spiffs_create_partition_image` 烧入 storage 分区)。
 - CodecPort 内置任务:`MusicTask`(循环播放固件内嵌 canon.pcm,24kHz/2ch/16bit,音量 80)与 `EchoTask`(ES7210 读 1024B → ES8311 即写,回声对讲);07 的 main 未启用这两个任务(自带事件组逻辑)。
 - 调试 API:`Codec_Set/GetCodecReg` 按名字("es8311"/"es7210")直读写编解码寄存器。
-- ⚠️ 代码观察:`EchoTask` 里 `heap_caps_malloc(1024, MALLOC_CAP_SPIRAM)`——C6 无 PSRAM,该任务若被启用会断言失败(07 未调用,属死代码风险)。
+- ⚠️ 代码观察:`EchoTask` 里 `heap_caps_malloc(1024, MALLOC_CAP_SPIRAM)` 且未判空——C6 无 PSRAM,该函数返回 NULL,任务若被启用会空指针读写崩溃(07 未调用它,属死代码风险)。
 
 ### 8. WiFi STA(05)/ SoftAP(06)
 
@@ -87,14 +87,14 @@
 
 ### 9. LVGL v8/v9 移植(`app_bsp/lvgl_bsp.cpp` + `espressif/esp_lvgl_adapter ^0.3.0`)
 
-- 同一份 `lvgl_bsp.cpp` 兼容双版本(`#if LVGL_VERSION_MAJOR >= 9` 分支):v8 挂 `disp_drv->rounder_cb`,v9 挂 `LV_EVENT_INVALIDATE_AREA` 事件回调,均为 2 像素对齐(起点向下取偶、终点向上取奇)——与 cubobox 的 rounder 相同。
-- 显示注册:`ESP_LV_ADAPTER_DISPLAY_SPI_WITHOUT_PSRAM_DEFAULT_CONFIG`(无 PSRAM 场景),绘制缓冲高 50 行;触摸 indev 经 `esp_lv_adapter_register_touch` 注册。
+- 同一份 `lvgl_bsp.cpp` 兼容双版本(`#if LVGL_VERSION_MAJOR >= 9` 分支):v8 挂 `disp_drv->rounder_cb`,v9 挂 `LV_EVENT_INVALIDATE_AREA` 事件回调,均为 2 像素对齐(起点向下取偶、终点向上取奇)——与 cubobox 的 rounder 相同。版本分布:**07/09 = LVGL 9.5,08 = LVGL 8.4**。
+- 显示注册:`ESP_LV_ADAPTER_DISPLAY_SPI_WITHOUT_PSRAM_DEFAULT_CONFIG`(无 PSRAM 场景),绘制缓冲高 **50 行(07/08)/ 100 行(09)**;触摸 indev 经 `esp_lv_adapter_register_touch` 注册;09 另有适配器任务调优(栈 20KB、优先级 10、绑核 0)。
 - 并发模型:`Lvgl_lock(timeout)/Lvgl_unlock` 互斥锁保护跨任务 LVGL 访问(如亮度任务与 LVGL 自带任务并存);`esp_lv_adapter_start()` 启动适配器内部 LVGL 任务。
 - 08/09 运行官方 `lv_demo_widgets()` 验证整链(屏+触摸+刷新)。
 
 ### 10. 文件存储(SPIFFS,07)
 
-- 分区:`storage` 3M SPIFFS(仅 07 的 partitions.csv 有;其余项目无数据分区)。
+- 分区:`storage` 3M SPIFFS(**07/08/09 的 partitions.csv 均为 factory 6M + storage 3M;01-06 为 factory 8M 无数据分区**)。
 - 挂载:`/spiffs`,失败自动格式化,max_files=2;PCM 资源在构建期打包进分区镜像随固件烧录。
 
 ## 官方引脚总表(以实际代码为准)
@@ -124,9 +124,9 @@
 | LVGL 移植 | esp_lvgl_adapter 组件 | 自写 flush_cb + tick 定时器 |
 | LVGL 上下文 | 互斥锁 + 适配器任务 | 仅 gui_task 上下文(无锁) |
 | TF/屏共存 | 示例分离,无切换逻辑 | 开机拉高 TF CS 释放总线 |
-| 分区 | factory 8M(+07 有 storage 3M) | factory 6M(storage 已删) |
+| 分区 | 01-06:factory 8M;07/08/09:factory 6M + storage 3M | factory 6M(storage 已删) |
 
 ## 环境备注
 
-- 官方目录名 `ESP-IDF-v5.5.3`,但 `sdkconfig.defaults` 注释表明由 **v5.5.1** 生成,组件清单只约束 `idf>=4.1.0`;核心依赖实际版本:`lvgl 8.4.0/9.5.0`、`esp_lcd_sh8601 1.0.0`(cubobox 用 2.0.1)、`esp_lcd_touch_cst9217 1.0.4`、`esp_lvgl_adapter 0.3.0`、`qmi8658 1.0.1`、`pcf85063a 1.1.1`。
+- 官方目录名 `ESP-IDF-v5.5.3`,`sdkconfig.defaults` 生成注释为 **5.5.1(01-06)/ 5.5.2(07/08/09)**,组件清单只约束 `idf>=4.1.0`;核心依赖实际版本:**lvgl 9.5.0(07/09)、8.4.0(08)**、`esp_lcd_sh8601 1.0.0`(cubobox 用 2.0.1)、`esp_lcd_touch_cst9217 1.0.4`、`esp_lvgl_adapter 0.3.0`、`qmi8658 1.0.1`、`pcf85063a 1.1.1`。
 - 语音助手能力(麦克风阵列 + WiFi 对话)在仓库 `02_Example/XiaoZhi-v2.2.5/` 中实现,同样不含蓝牙。
