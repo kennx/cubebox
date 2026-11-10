@@ -42,7 +42,7 @@ docs/apps/            # 每个应用一份说明文档（强制，见"分层架�
 - `docs/firmwares/`：官方固件研究——Waveshare ESP-IDF 示例的目录结构与设备能力清单（蓝牙/BOOT 键官方未实现；触摸方向参数、AXP2101 轨配置等官方事实）。
 - `docs/apps/`：应用说明文档，每个 `app_*` 一份（如 `app_clock.md`）。
 - `managed_components/`：IDF 组件管理器自动下载的依赖（如 `lvgl__lvgl`、`espressif__esp_lcd_sh8601`）。**对 Agent 只读**。
-- `sdkconfig` / `sdkconfig.defaults`：项目 Kconfig 配置。修改后需重新运行 `idf.py reconfigure`。
+- `sdkconfig` / `sdkconfig.defaults`：项目 Kconfig 配置。改 `sdkconfig` 后 `idf.py reconfigure` 生效；改 `sdkconfig.defaults` 需删除本地 `sdkconfig`（或 `idf.py fullclean`）重新生成——已有 `sdkconfig` 的条目（含 `# ... is not set`）不会被 defaults 覆盖，`reconfigure` 不吸收。
 - `partitions.csv`：Flash 分区表。当前包含 nvs、phy_init、factory（6M app）。
 
 ## 分层架构约束
@@ -51,7 +51,7 @@ docs/apps/            # 每个应用一份说明文档（强制，见"分层架�
 
 ### HAL（`main/hal/`，硬件抽象层）
 
-- 一个硬件子系统一个文件：`hal_<subsys>.{c,h}`（电源/显示，未来触摸/音频/IMU/TF…），并统一在 `hal/hal.h` 聚合，上层只 include 聚合头。
+- 一个硬件子系统一个文件：`hal_<subsys>.{c,h}`（电源/显示/触摸，未来音频/IMU/TF…），并统一在 `hal/hal.h` 聚合，上层只 include 聚合头。
 - 对上层只暴露统一接口 `hal_<subsys>_<op>()`；初始化期需要的外部句柄（如 i2c 总线）只允许出现在组合根 `main.c` 调用的 `hal_<subsys>_init()` 签名中，头文件用前向声明避免把驱动头传染给上层（见 `hal_power.h`），驱动句柄不得越过组合根进入 apps 层；寄存器细节不出 `hal_*.c`；hal 之间允许互相依赖（如 hal_display 经 hal_power 做屏电源复位）。
 - **apps 层绝不直接 include 驱动头或操作 GPIO/寄存器**——一律经 HAL。
 - 新增硬件子系统：新建 `hal/hal_<subsys>.{c,h}` → 在 hal.h 聚合 → `idf.py reconfigure`。

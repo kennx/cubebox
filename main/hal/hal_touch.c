@@ -21,9 +21,9 @@
 #define TOUCH_GPIO_RST         11
 #define TOUCH_GPIO_INT         5
 
-/* 连续读取失败上限（约 4.5s @30ms 读周期，真 I2C 故障时组件每次还会
- * RST 复位 + vTaskDelay 约 60ms）：持续故障会拖垮 gui_task——超限即停用
- * 触摸（一次性降级，重启恢复），保住 UI 主循环。 */
+/* 连续 I2C 故障上限（秒级容忍：真故障时组件单次读取即阻塞约 80ms+——
+ * 重试 5 次 + RST 复位/延时，远超 30ms 正常读周期——持续故障会拖垮
+ * gui_task）：超限即停用触摸（一次性降级，重启恢复），保住 UI 主循环。 */
 #define TOUCH_READ_FAIL_LIMIT 50
 
 static esp_lcd_touch_handle_t s_touch = NULL;
@@ -93,6 +93,7 @@ void hal_touch_init(i2c_master_bus_handle_t bus)
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "CST9220 probe failed: %s, touch disabled", esp_err_to_name(err));
         s_touch = NULL;
+        esp_lcd_panel_io_del(io); /* 组件构造失败已自删 touch 句柄，回收 io */
         return;
     }
 

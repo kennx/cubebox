@@ -13,7 +13,9 @@ static void swipe_nav_gesture_cb(lv_event_t *e)
     } else if (dir == LV_DIR_RIGHT) {
         swipe_nav_step(-1); /* 右滑：回到上一个应用 */
     }
-    lv_event_stop_bubbling(e); /* 手势已消费，不再向外冒泡 */
+    /* 注：LV_EVENT_GESTURE 由 indev 的手势检测直发目标对象（冒泡在其内部
+     * 沿 GESTURE_BUBBLE 完成），不走通用事件冒泡链，无需 stop_bubbling。 */
+    LV_UNUSED(e);
 }
 
 void swipe_nav_attach(lv_obj_t *screen)

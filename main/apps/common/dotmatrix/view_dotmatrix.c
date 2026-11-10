@@ -19,6 +19,9 @@ typedef struct {
 
 extern const lv_obj_class_t dotmatrix_widget_class;
 
+/* 圆心按屏幕绝对坐标计算（LVGL invalidate/draw 均为绝对坐标语义）——
+ * 前提：widget 全屏铺在 (0,0)。若日后复用于非原点容器，需改为叠加
+ * widget 自身边偏移。 */
 static lv_coord_t dot_center(int i)
 {
     return (lv_coord_t)(DOTMATRIX_ORIGIN +
