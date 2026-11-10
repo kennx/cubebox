@@ -1,4 +1,6 @@
+#include <stdlib.h>
 #include <string.h>
+#include <time.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
 #include <esp_log.h>
@@ -10,6 +12,8 @@
 #include "lvgl.h"
 #include "hal/hal.h"
 #include "apps/apps.h"
+#include "apps/common/swipe_nav/swipe_nav.h"
+#include "apps/app_clock/app_clock.h"
 #include "apps/app_test/app_test.h"
 
 #define TAG "main"
@@ -24,6 +28,7 @@
  * 配置，ESP_LOG 与命令/截图流共用同一通道）；此处经 usb_serial_jtag
  * 驱动直读，绕开 console 子系统的行缓冲，读取不受日志输出干扰。
  *   SNAP   — 触发一次全屏截图流（配合 tools/screenshot.py）
+ *   NEXT   — 循环切换到下一个已安装应用（触摸失效时的兜底验证途径）
  *   REBOOT — 远程重启（抓完整启动日志用）
  */
 static void console_task(void *arg)
@@ -53,6 +58,8 @@ static void console_task(void *arg)
             len = 0;
             if (strcmp(line, "SNAP") == 0) {
                 hal_display_snapshot_arm();
+            } else if (strcmp(line, "NEXT") == 0) {
+                swipe_nav_step(1); /* 循环切下一个已安装应用（触摸失效时的兜底） */
             } else if (strcmp(line, "REBOOT") == 0) {
                 esp_restart();
             }
@@ -87,6 +94,11 @@ static void gui_task(void *arg)
 
 void app_main(void)
 {
+    /* 时区 UTC+8：app_clock 按本地时间走秒（系统时钟未同步时开机 08:00 起，
+     * RTC/SNTP 同步为后续独立工作） */
+    setenv("TZ", "CST-8", 1);
+    tzset();
+
     /* Pull up TF card CS (GPIO 6) to disable TF card and release the shared SPI/QSPI bus lines */
     gpio_config_t tf_cs_cfg = {
         .pin_bit_mask = 1ULL << 6,
@@ -113,15 +125,19 @@ void app_main(void)
     i2c_master_bus_handle_t i2c_bus = NULL;
     ESP_ERROR_CHECK(i2c_new_master_bus(&bus_cfg, &i2c_bus));
 
-    /* HAL：先电源后显示（显示复位依赖 ALDO3） */
+    /* HAL：先电源后显示（显示复位依赖 ALDO3），再触摸（失败不致命） */
     hal_power_init(i2c_bus);
     hal_display_init();
+    hal_touch_init(i2c_bus);
 
-    /* 安装应用，请求启动默认应用（gui_task 首轮 apps_update 消费请求） */
+    /* 安装应用（安装顺序即左右滑动的切换顺序），默认启动点阵时钟 */
+    if (!apps_install(&app_clock)) {
+        ESP_LOGE(TAG, "apps_install(app_clock) failed (table full or duplicate)");
+    }
     if (!apps_install(&app_test)) {
         ESP_LOGE(TAG, "apps_install(app_test) failed (table full or duplicate)");
     }
-    apps_request_open(app_test.name);
+    apps_request_open(app_clock.name);
 
     xTaskCreate(gui_task, "gui_task", 4096 * 2, NULL, 5, NULL);
     xTaskCreate(console_task, "console", 4096, NULL, 5, NULL);

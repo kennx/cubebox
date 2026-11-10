@@ -26,18 +26,21 @@ main/
 └── apps/             # 应用层
     ├── apps.{c,h}    # 应用框架：注册表 + 生命周期状态机（主机可测纯 C）
     ├── common/       # 跨应用共享组件（约定见 common/README.md）
-    ├── app_ok/       # OK 演示应用（含 view/ 子目录）
+    │   ├── dotmatrix/   # 23×23 点阵：纯逻辑网格+字体表（主机可测）+ LVGL widget
+    │   └── swipe_nav/   # 左右滑动手势导航（循环切换，走 apps_request_open）
+    ├── app_clock/    # 点阵数字时钟（默认第一屏，含 view/ 子目录）
+    ├── app_test/     # 点阵「OK」框架验证屏（含 view/ 子目录）
     └── app_template/ # 新应用复制模板（不安装，未被引用代码由链接器 GC 剔除）
 tests/                # 主机端单元测试（独立 CMake 工程，ctest）
 docs/apps/            # 每个应用一份说明文档（强制，见"分层架构约束"）
 ```
 
-- `main/main.c`：app_main 初始化顺序（TF CS 释放、I2C 总线、HAL、安装应用并请求启动默认应用）、gui_task 主循环（截图请求 → `apps_update()` → `lv_timer_handler`）、USB 调试 console 任务（SNAP/REBOOT 命令）。
+- `main/main.c`：app_main 初始化顺序（时区 UTC+8、TF CS 释放、I2C 总线、HAL、安装应用并请求启动默认应用 clock）、gui_task 主循环（截图请求 → `apps_update()` → `lv_timer_handler`）、USB 调试 console 任务（SNAP/NEXT/REBOOT 命令）。应用安装顺序即左右滑动的切换顺序（clock → test，循环）。
 - `main/CMakeLists.txt`：主组件构建配置。`hal/` 与 `apps/` 源码按 GLOB_RECURSE 递归收集——**新增/删除源文件后必须 `idf.py reconfigure`**（GLOB 仅在 configure 时求值，直接 build 不会感知新文件）。
-- `main/idf_component.yml`：IDF 组件管理器清单。当前依赖 `espressif/esp_lcd_sh8601` 与 `lvgl/lvgl`。
+- `main/idf_component.yml`：IDF 组件管理器清单。当前依赖 `espressif/esp_lcd_sh8601`、`lvgl/lvgl` 与 `waveshare/esp_lcd_touch_cst9217`。
 - `docs/hardwares/`：硬件规格与参考文档。
 - `docs/firmwares/`：官方固件研究——Waveshare ESP-IDF 示例的目录结构与设备能力清单（蓝牙/BOOT 键官方未实现；触摸方向参数、AXP2101 轨配置等官方事实）。
-- `docs/apps/`：应用说明文档，每个 `app_*` 一份（如 `app_ok.md`）。
+- `docs/apps/`：应用说明文档，每个 `app_*` 一份（如 `app_clock.md`）。
 - `managed_components/`：IDF 组件管理器自动下载的依赖（如 `lvgl__lvgl`、`espressif__esp_lcd_sh8601`）。**对 Agent 只读**。
 - `sdkconfig` / `sdkconfig.defaults`：项目 Kconfig 配置。修改后需重新运行 `idf.py reconfigure`。
 - `partitions.csv`：Flash 分区表。当前包含 nvs、phy_init、factory（6M app）。
@@ -59,7 +62,7 @@ docs/apps/            # 每个应用一份说明文档（强制，见"分层架�
 - 生命周期四回调对照 StackChan 的 mooncake AppAbility（契约全文见 `main/apps/apps.h`，模板见 `apps/app_template/`）：
   `on_create`（安装一次，任意上下文，不得碰 LVGL）→ `on_open`（建 UI）→ `on_running`（gui_task 每循环）→ `on_close`（释放资源）。
 - **所有 LVGL 调用仅限 gui_task 上下文**（on_open/on_running/on_close 天然满足）；其他任务启动/切换应用只能经 `apps_request_open()` 交接，由 gui_task 的 `apps_update()` 消费；**生命周期回调内切换应用也只许 `apps_request_open`（下一轮生效），禁止嵌套调用 `apps_open`**。
-- 新建应用流程：复制 `apps/app_template/` 为 `apps/app_<name>/` → 在 `main.c` `apps_install()` 注册 → **必须同步写 `docs/apps/<name>.md` 说明文档**（功能、生命周期表、文件构成、验证方式，参照 `docs/apps/app_ok.md`）。
+- 新建应用流程：复制 `apps/app_template/` 为 `apps/app_<name>/` → 在 `main.c` `apps_install()` 注册 → **必须同步写 `docs/apps/<name>.md` 说明文档**（功能、生命周期表、文件构成、验证方式，参照 `docs/apps/app_clock.md`）。
 - 跨应用共享的 UI 组件/工具放 `apps/common/`（约定见其 README.md）；只有一个使用者时留在 app 内，出现第二个使用者再上移。
 
 ### tests（根目录 `tests/`，主机端单元测试）
@@ -125,7 +128,7 @@ idf.py set-target esp32c6
   | CST9220 | 0x5A | 电容触摸控制器 |
 - **屏幕与触摸**：
   - 板载 2.16 英寸 480×480 高清 AMOLED 屏，驱动 IC 为 CO5300（代码中兼容并常用 `esp_lcd_sh8601` QSPI 驱动）。
-  - 电容触控芯片为 CST9220（I2C 通信；当前固件未启用触摸驱动）。
+  - 电容触控芯片为 CST9220（I2C 0x5A，经 `hal_touch` 用 `waveshare/esp_lcd_touch_cst9217` 组件驱动并注册 LVGL 输入；INT=GPIO 5、RST=GPIO 11、swap_xy+mirror_y；初始化失败不致命）。
   - 屏幕背光通过发送命令 `0x51` 调节亮度，无独立 GPIO 控制。
   - 显示屏复位由 AXP2101 ALDO3 控制电源复位，无独立 RST GPIO。
 - **QSPI / SPI 冲突**：LCD（QSPI，4-bit）与 TF 卡（SDSPI，1-bit）共享 CLK/MOSI/MISO GPIO，两者不能同时以最高性能传输，需由软件控制 CS 切换总线访问。典型做法：初始化时上拉 TF CS（GPIO 6）释放总线给 LCD。
@@ -154,6 +157,7 @@ idf.py set-target esp32c6
 - **烧录**：日常开发使用 `tools/flash.sh [PORT]` 一键完成编译、烧录。
 - **远程调试（USB 控制台命令，`main.c` 的 console 任务经 usb_serial_jtag 驱动直读；主 console 即 USB-Serial/JTAG——sdkconfig.defaults 配置，ESP_LOG 与 SNAP 截图流共用同一通道，screenshot.py 已过滤日志行）**：
   - `SNAP` + `tools/screenshot.py -p PORT -o shot.png`：抓取屏幕 PNG（用系统 python 跑，IDF venv 缺 Pillow）。
+  - `NEXT`：循环切换到下一个已安装应用（触摸失效时的兜底验证途径）。
   - `REBOOT`：远程重启（抓完整启动日志用）。
 - **验证要求**：
   - 完成功能后，必须执行构建验证：`idf.py build`

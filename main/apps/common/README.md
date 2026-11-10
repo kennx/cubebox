@@ -14,5 +14,7 @@ toast、加载页等）。
 ## 约定
 
 - 每个共享组件一个子目录：`common/<component>/<component>.{c,h}`
-- 组件只依赖 HAL 与 LVGL，不依赖任何具体 app
-- 目前暂无共享组件（仅一个 app_ok）
+- 组件不依赖任何具体 app（可用 HAL、LVGL 与 apps 框架）
+- 现有组件：
+  - `dotmatrix/`：23×23 点阵（`dotmatrix.{c,h}` 纯逻辑网格+3×5 字体表，主机可测；`view_dotmatrix.{c,h}` LVGL 差量绘制 widget）
+  - `swipe_nav/`：左右滑动手势导航（挂 app screen，循环切换走 `apps_request_open`）
