@@ -1,7 +1,7 @@
 # 点阵时钟 + 滑动切换 App 设计
 
 日期：2026-11-10
-状态：待用户批准
+状态：定稿（builder 审查问题已裁决），待用户批准
 
 ## 意图与动机
 
@@ -127,6 +127,10 @@ CubeBox 固件目前只有一个演示应用 app_ok。本次为它建立"多应�
 - 触摸坐标方向若与显示不一致（Waveshare 文档提示有方向参数），在 read 回调内
   交换/镜像——上机验证点。
 - LVGL indev 属于硬件输入设备，在 HAL 注册与 hal_display 注册显示驱动同性质。
+- **失败语义（已裁决）**：触摸初始化失败（组件返回错误/I2C 探测失败）**不致命**——
+  `ESP_LOGE` + 跳过 indev 注册 + 继续启动，设备仍是一台能走时的时钟，SNAP/NEXT
+  兜底照常可用；与 hal_power/hal_display 的 `ESP_ERROR_CHECK` 中止语义不同，理由：
+  触摸非生存必需。运行期 read 回调内 I2C 偶发错误按"本轮无触摸"静默处理。
 
 ### 3. `apps/common/swipe_nav/` —— 滑动导航组件
 
@@ -137,6 +141,8 @@ CubeBox 固件目前只有一个演示应用 app_ok。本次为它建立"多应�
   新增 apps API `size_t apps_count(void);` / `const char *apps_name_at(size_t idx);`
   （越界返回 NULL），由 `apps_current_name()` 定位当前下标，目标经
   `apps_request_open()` 交接——天然满足"回调内只许 request"的契约。
+  组件直接依赖 apps 框架（不做回调注入抽象，已裁决）；据此把 `common/README.md`
+  依赖约定从"只依赖 HAL 与 LVGL"放宽为"不依赖任何具体 app（可用 apps 框架）"。
 - 仅一个 app 在屏时触摸落在其全屏 widget 上：LVGL v8 gesture 事件发给按压对象，
   需冒泡到 screen——widget 创建时置 `LV_OBJ_FLAG_EVENT_BUBBLE`（view_dotmatrix
   内完成，业务 view 无感）。上机验证点，若路径不通则退化为逐对象挂回调。
@@ -191,8 +197,9 @@ CubeBox 固件目前只有一个演示应用 app_ok。本次为它建立"多应�
 1. 主机：`cmake -S tests -B tests/build && cmake --build tests/build && ctest --test-dir tests/build --output-on-failure`。
 2. `idf.py build` 零错误零新增警告（新增源文件后 reconfigure）。
 3. 上机：`tools/flash.sh` 烧录 → SNAP 截图对比 example.svg（时钟居中、点阵几何、
-   冒号两次截图一亮一灭）→ 真机左右滑动验证 clock↔test 循环切换与生命周期日志 →
-   `NEXT` 命令复验 → `REBOOT` 抓启动日志。
+   冒号两次截图一亮一灭；截图若跨越冒号翻转边界出现半亮半灭撕裂属预期现象，
+   重拍取相位即可——已裁决，不为截图冻结时钟）→ 真机左右滑动验证 clock↔test
+   循环切换与生命周期日志 → `NEXT` 命令复验 → `REBOOT` 抓启动日志。
 
 ## 风险与应对
 
