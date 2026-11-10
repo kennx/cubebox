@@ -22,6 +22,7 @@
 - `main/CMakeLists.txt`：主组件构建配置。新增源文件或依赖时必须修改。
 - `main/idf_component.yml`：IDF 组件管理器清单。当前依赖 `espressif/esp_lcd_sh8601` 与 `lvgl/lvgl`。
 - `docs/hardwares/`：硬件规格与参考文档。
+- `docs/firmwares/`：官方固件研究——Waveshare ESP-IDF 示例的目录结构与设备能力清单（蓝牙/BOOT 键官方未实现；触摸方向参数、AXP2101 轨配置等官方事实）。
 - `managed_components/`：IDF 组件管理器自动下载的依赖（如 `lvgl__lvgl`、`espressif__esp_lcd_sh8601`）。**对 Agent 只读**。
 - `sdkconfig` / `sdkconfig.defaults`：项目 Kconfig 配置。修改后需重新运行 `idf.py reconfigure`。
 - `partitions.csv`：Flash 分区表。当前包含 nvs、phy_init、factory（6M app）。
