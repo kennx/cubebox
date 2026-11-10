@@ -173,6 +173,12 @@ int main(void)
     expect(cnt_a.open == 3, "deferred request consumed next round");
     expect_str(apps_current_name(), "a", "back to a after deferred switch");
 
+    /* 枚举 API：安装顺序即下标顺序，越界返回 NULL */
+    expect(apps_count() == 4, "count is 4 after a/b/r/min");
+    expect_str(apps_name_at(0), "a", "name_at(0) is a");
+    expect_str(apps_name_at(3), "min", "name_at(3) is min");
+    expect(apps_name_at(4) == NULL, "name_at out of range is NULL");
+
     /* 表满：装满 APPS_MAX 后拒绝（当前已装 a/b/r/min 共 4 个） */
     for (int i = 0; i < 4; i++) {
         fillers[i].name = filler_names[i];

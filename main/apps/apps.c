@@ -108,3 +108,22 @@ const char *apps_current_name(void)
 {
     return s_current >= 0 ? s_apps[s_current]->name : NULL;
 }
+
+size_t apps_count(void)
+{
+    size_t n = 0;
+    for (int i = 0; i < APPS_MAX; i++) {
+        if (s_apps[i] != NULL) {
+            n++;
+        }
+    }
+    return n;
+}
+
+const char *apps_name_at(size_t idx)
+{
+    if (idx >= (size_t)APPS_MAX || s_apps[idx] == NULL) {
+        return NULL;
+    }
+    return s_apps[idx]->name;
+}

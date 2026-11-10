@@ -66,3 +66,9 @@ void apps_update(void);
 
 /* 当前打开的应用名；无应用打开时返回 NULL */
 const char *apps_current_name(void);
+
+/* 已安装应用数（按 apps_install 先后计数，无卸载语义） */
+size_t apps_count(void);
+
+/* 按安装顺序取第 idx 个应用名（idx 从 0 起）；越界返回 NULL */
+const char *apps_name_at(size_t idx);
