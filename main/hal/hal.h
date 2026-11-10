@@ -5,3 +5,4 @@
 
 #include "hal/hal_power.h"
 #include "hal/hal_display.h"
+#include "hal/hal_touch.h"
