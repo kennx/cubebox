@@ -7,6 +7,6 @@
  * 在 main.c 里 apps_install 注册）。
  *
  * 生命周期契约见 apps/apps.h；对照 StackChan firmware/main/apps/app_template。
- * 无 UI 的应用不需要 view/ 子目录；需要 UI 时参照 app_ok 的 view/ 组织。
+ * 无 UI 的应用不需要 view/ 子目录；需要 UI 时参照 app_test 的 view/ 组织。
  */
 extern const app_lifecycle_t app_template;
