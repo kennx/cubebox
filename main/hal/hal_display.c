@@ -128,9 +128,11 @@ static void lvgl_flush_cb(lv_disp_drv_t *drv, const lv_area_t *area, lv_color_t 
     }
     memcpy(swap_buf, color_map, size * sizeof(lv_color_t));
 
-    /* 截图调试：逐行流出最终送显像素（RGB565 hex，内存字节序）。
+    /* 截图调试：逐行流出最终送显像素（RGB565 hex，低字节在前的内存序）。
      * 每行一条 "#SNAP x1 y x2 y" + 该行 hex（≤1952B 单次写，防溢出），
-     * host 端按坐标覆盖重组；END 后仍可能收到个别迟到条带，host 端忽略即可。 */
+     * host 端按坐标覆盖重组；END 后仍可能收到个别迟到条带，host 端忽略即可。
+     * LV_COLOR_16_SWAP=y 时 .full 的位模式 = bswap16(逻辑值)（位域 green 被拆
+     * 到两端），流出前交换回逻辑值，host 端解析格式保持不变。 */
     if (s_snap_active) {
         static const char hx[] = "0123456789abcdef";
         for (uint32_t row = 0; row < height; row++) {
@@ -139,6 +141,7 @@ static void lvgl_flush_cb(lv_disp_drv_t *drv, const lv_area_t *area, lv_color_t 
                              offsetx1, gy, offsetx2, gy);
             for (uint32_t x = 0; x < width; x++) {
                 uint16_t v = swap_buf[row * width + x].full;
+                v = (uint16_t)((v << 8) | (v >> 8));
                 s_snap_line[n++] = hx[(v >> 4) & 0xF];
                 s_snap_line[n++] = hx[v & 0xF];
                 s_snap_line[n++] = hx[(v >> 12) & 0xF];
