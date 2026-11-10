@@ -11,9 +11,18 @@ view_ok_t *view_ok_create(void)
 
     view->prev_screen = lv_scr_act();
     view->screen = lv_obj_create(NULL);
+    if (view->screen == NULL) {
+        lv_mem_free(view);
+        return NULL;
+    }
     lv_obj_set_style_bg_color(view->screen, lv_color_black(), 0);
 
     view->label = lv_label_create(view->screen);
+    if (view->label == NULL) {
+        lv_obj_del(view->screen);
+        lv_mem_free(view);
+        return NULL;
+    }
     lv_obj_set_style_text_font(view->label, &lv_font_montserrat_48, 0);
     lv_obj_set_style_text_color(view->label, lv_color_white(), 0);
     lv_label_set_text(view->label, "OK");

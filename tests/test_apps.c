@@ -14,7 +14,7 @@ typedef struct {
     int create, open, running, close;
 } counters_t;
 
-static counters_t cnt_a, cnt_b, cnt_min;
+static counters_t cnt_a, cnt_b, cnt_min, cnt_r;
 
 static void a_on_create(app_t *app) { (void)app; cnt_a.create++; }
 static void a_on_open(app_t *app) { (void)app; cnt_a.open++; }
@@ -27,6 +27,11 @@ static void b_on_running(app_t *app) { (void)app; cnt_b.running++; }
 static void b_on_close(app_t *app) { (void)app; cnt_b.close++; }
 
 static void min_on_create(app_t *app) { (void)app; cnt_min.create++; }
+
+/* on_open 内发起切换请求：验证延迟到下一轮 update 生效 */
+static void r_on_create(app_t *app) { (void)app; cnt_r.create++; }
+static void r_on_open(app_t *app) { (void)app; cnt_r.open++; apps_request_open("a"); }
+static void r_on_close(app_t *app) { (void)app; cnt_r.close++; }
 
 static const app_lifecycle_t app_stub_a = {
     .name = "a",
@@ -53,6 +58,23 @@ static const app_lifecycle_t app_stub_min = {
     .on_close = NULL,
 };
 
+static const app_lifecycle_t app_stub_r = {
+    .name = "r",
+    .on_create = r_on_create,
+    .on_open = r_on_open,
+    .on_running = NULL,
+    .on_close = r_on_close,
+};
+
+/* 空 name：install 应拒绝 */
+static const app_lifecycle_t app_stub_empty = {
+    .name = "",
+};
+
+/* 表满测试用填充应用（运行时填 name，回调全 NULL） */
+static const char *const filler_names[] = {"c", "d", "e", "f", "g"};
+static app_lifecycle_t fillers[5];
+
 /* ---- 断言 ---- */
 
 static void expect(int cond, const char *label)
@@ -74,9 +96,10 @@ static void expect_str(const char *actual, const char *expected, const char *lab
 
 int main(void)
 {
-    /* 安装：on_create 各触发一次；重名/NULL 拒绝 */
+    /* 安装：on_create 各触发一次；重名/NULL/空 name 拒绝 */
     expect(apps_install(&app_stub_a) == true, "install a");
     expect(apps_install(&app_stub_b) == true, "install b");
+    expect(apps_install(&app_stub_r) == true, "install r");
     expect(cnt_a.create == 1 && cnt_b.create == 1, "on_create once each at install");
     expect(apps_install(&app_stub_a) == false, "duplicate name rejected");
     expect(apps_install(NULL) == false, "NULL api rejected");
@@ -128,6 +151,35 @@ int main(void)
     expect(cnt_a.create == 1, "on_create still once across reopens");
     expect(cnt_a.open == 2, "on_open again on reopen");
     expect_str(apps_current_name(), "a", "back to a");
+
+    /* 请求未知/超长应用名：静默忽略，状态不变 */
+    apps_request_open("nope");
+    apps_update();
+    expect_str(apps_current_name(), "a", "unknown request ignored");
+    apps_request_open("abcdefghijklmnopqrstuvwxyz012345");
+    apps_update();
+    expect_str(apps_current_name(), "a", "long unknown request ignored");
+
+    /* 空 name 拒绝安装 */
+    expect(apps_install(&app_stub_empty) == false, "empty name rejected");
+
+    /* 回调内发起切换请求：本轮只打开 r，延迟请求下一轮才消费 */
+    apps_request_open("r");
+    apps_update();
+    expect_str(apps_current_name(), "r", "reentrant request: r open this round");
+    expect(cnt_a.open == 2, "no immediate switch inside on_open");
+    apps_update();
+    expect(cnt_r.close == 1, "r closed on deferred switch");
+    expect(cnt_a.open == 3, "deferred request consumed next round");
+    expect_str(apps_current_name(), "a", "back to a after deferred switch");
+
+    /* 表满：装满 APPS_MAX 后拒绝（当前已装 a/b/r/min 共 4 个） */
+    for (int i = 0; i < 4; i++) {
+        fillers[i].name = filler_names[i];
+        expect(apps_install(&fillers[i]) == true, "install filler");
+    }
+    fillers[4].name = filler_names[4];
+    expect(apps_install(&fillers[4]) == false, "table full rejected");
 
     printf("test_apps: all passed\n");
     return 0;

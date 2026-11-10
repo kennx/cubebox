@@ -1,6 +1,8 @@
 #pragma once
 
-#include "driver/i2c_master.h"
+/* 前向声明 IDF 句柄类型（与 driver/i2c_types.h 的定义逐字一致），使上层经
+ * hal.h 聚合引入时不再传染 driver/i2c_master.h；总线由组合根 main.c 创建。 */
+typedef struct i2c_master_bus_t *i2c_master_bus_handle_t;
 
 /**
  * @brief 初始化 AXP2101 电源管理（在已创建的 i2c 总线上挂设备并配置输出）

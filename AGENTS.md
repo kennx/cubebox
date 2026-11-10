@@ -27,7 +27,7 @@ main/
     ├── apps.{c,h}    # 应用框架：注册表 + 生命周期状态机（主机可测纯 C）
     ├── common/       # 跨应用共享组件（约定见 common/README.md）
     ├── app_ok/       # OK 演示应用（含 view/ 子目录）
-    └── app_template/ # 新应用复制模板（不安装、不进固件）
+    └── app_template/ # 新应用复制模板（不安装，未被引用代码由链接器 GC 剔除）
 tests/                # 主机端单元测试（独立 CMake 工程，ctest）
 docs/apps/            # 每个应用一份说明文档（强制，见"分层架构约束"）
 ```
@@ -49,7 +49,7 @@ docs/apps/            # 每个应用一份说明文档（强制，见"分层架�
 ### HAL（`main/hal/`，硬件抽象层）
 
 - 一个硬件子系统一个文件：`hal_<subsys>.{c,h}`（电源/显示，未来触摸/音频/IMU/TF…），并统一在 `hal/hal.h` 聚合，上层只 include 聚合头。
-- 对上层只暴露统一接口 `hal_<subsys>_<op>()`，不泄漏驱动句柄与寄存器细节；hal 之间允许互相依赖（如 hal_display 经 hal_power 做屏电源复位）。
+- 对上层只暴露统一接口 `hal_<subsys>_<op>()`；初始化期需要的外部句柄（如 i2c 总线）只允许出现在组合根 `main.c` 调用的 `hal_<subsys>_init()` 签名中，头文件用前向声明避免把驱动头传染给上层（见 `hal_power.h`），驱动句柄不得越过组合根进入 apps 层；寄存器细节不出 `hal_*.c`；hal 之间允许互相依赖（如 hal_display 经 hal_power 做屏电源复位）。
 - **apps 层绝不直接 include 驱动头或操作 GPIO/寄存器**——一律经 HAL。
 - 新增硬件子系统：新建 `hal/hal_<subsys>.{c,h}` → 在 hal.h 聚合 → `idf.py reconfigure`。
 
@@ -58,7 +58,7 @@ docs/apps/            # 每个应用一份说明文档（强制，见"分层架�
 - 每个应用一个 `app_<name>/` 子目录，独立的应用模块。`app_<name>.{c,h}` 只写生命周期回调；**有 UI 的应用必须建 `view/` 子目录**放界面构建/销毁（`view_<name>.{c,h}`），app 主文件不直接调用 LVGL。
 - 生命周期四回调对照 StackChan 的 mooncake AppAbility（契约全文见 `main/apps/apps.h`，模板见 `apps/app_template/`）：
   `on_create`（安装一次，任意上下文，不得碰 LVGL）→ `on_open`（建 UI）→ `on_running`（gui_task 每循环）→ `on_close`（释放资源）。
-- **所有 LVGL 调用仅限 gui_task 上下文**（on_open/on_running/on_close 天然满足）；其他任务启动/切换应用只能经 `apps_request_open()` 交接，由 gui_task 的 `apps_update()` 消费。
+- **所有 LVGL 调用仅限 gui_task 上下文**（on_open/on_running/on_close 天然满足）；其他任务启动/切换应用只能经 `apps_request_open()` 交接，由 gui_task 的 `apps_update()` 消费；**生命周期回调内切换应用也只许 `apps_request_open`（下一轮生效），禁止嵌套调用 `apps_open`**。
 - 新建应用流程：复制 `apps/app_template/` 为 `apps/app_<name>/` → 在 `main.c` `apps_install()` 注册 → **必须同步写 `docs/apps/<name>.md` 说明文档**（功能、生命周期表、文件构成、验证方式，参照 `docs/apps/app_ok.md`）。
 - 跨应用共享的 UI 组件/工具放 `apps/common/`（约定见其 README.md）；只有一个使用者时留在 app 内，出现第二个使用者再上移。
 

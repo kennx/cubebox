@@ -118,7 +118,9 @@ void app_main(void)
     hal_display_init();
 
     /* 安装应用，请求启动默认应用（gui_task 首轮 apps_update 消费请求） */
-    apps_install(&app_ok);
+    if (!apps_install(&app_ok)) {
+        ESP_LOGE(TAG, "apps_install(app_ok) failed (table full or duplicate)");
+    }
     apps_request_open(app_ok.name);
 
     xTaskCreate(gui_task, "gui_task", 4096 * 2, NULL, 5, NULL);

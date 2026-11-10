@@ -4,7 +4,6 @@
  * （tests/CMakeLists.txt，对照 StackChan firmware/tests 的做法）。
  */
 #include <stdatomic.h>
-#include <stdio.h>
 #include <string.h>
 
 #include "apps/apps.h"
@@ -13,9 +12,10 @@ static const app_lifecycle_t *s_apps[APPS_MAX];  /* 已安装应用的描述符 
 static app_t s_instances[APPS_MAX];              /* 各应用实例（api + user_data） */
 static int s_current = -1;                       /* 当前打开的应用下标，-1 无 */
 
-/* 跨任务切换请求：生产者（console 等）先写 payload 再置位，gui_task 消费 */
-static char s_pending[APP_NAME_MAX];
-static atomic_bool s_pending_valid = false;
+/* 跨任务切换请求：原子下标交接，-1 表示无请求。apps_request_open 先在只读
+ * 注册表里把名字解析成下标，再原子写入——生产者/消费者之间没有任何共享
+ * 字符串缓冲，天然无撕裂、无丢失。 */
+static atomic_int s_pending_idx = -1;
 
 static int apps_find(const char *name)
 {
@@ -52,14 +52,11 @@ bool apps_install(const app_lifecycle_t *api)
     return false; /* 表满 */
 }
 
-bool apps_open(const char *name)
+/* 关闭当前应用并打开下标 idx 的应用（幂等）。仅 gui_task 上下文。 */
+static void apps_open_idx(int idx)
 {
-    int idx = apps_find(name);
-    if (idx < 0) {
-        return false;
-    }
     if (s_current == idx) {
-        return true; /* 幂等：已在打开 */
+        return; /* 幂等：已在打开 */
     }
     if (s_current >= 0) {
         const app_lifecycle_t *old = s_apps[s_current];
@@ -72,6 +69,15 @@ bool apps_open(const char *name)
     if (s_apps[idx]->on_open != NULL) {
         s_apps[idx]->on_open(&s_instances[idx]);
     }
+}
+
+bool apps_open(const char *name)
+{
+    int idx = apps_find(name);
+    if (idx < 0) {
+        return false;
+    }
+    apps_open_idx(idx);
     return true;
 }
 
@@ -80,18 +86,18 @@ void apps_request_open(const char *name)
     if (name == NULL) {
         return;
     }
-    (void)snprintf(s_pending, sizeof(s_pending), "%s", name);
-    atomic_store(&s_pending_valid, true);
+    int idx = apps_find(name);
+    if (idx >= 0) {
+        atomic_store(&s_pending_idx, idx);
+    }
 }
 
 void apps_update(void)
 {
-    if (atomic_exchange(&s_pending_valid, false)) {
-        /* 拷贝到局部并立刻清空 s_pending，允许 on_open 内再次发起请求 */
-        char name[APP_NAME_MAX];
-        (void)strcpy(name, s_pending);
-        s_pending[0] = '\0';
-        (void)apps_open(name);
+    /* exchange 一次性取走请求；on_open 内再次发起的请求留待下一轮消费 */
+    int idx = atomic_exchange(&s_pending_idx, -1);
+    if (idx >= 0) {
+        apps_open_idx(idx);
     }
     if (s_current >= 0 && s_apps[s_current]->on_running != NULL) {
         s_apps[s_current]->on_running(&s_instances[s_current]);
