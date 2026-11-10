@@ -13,10 +13,10 @@
 #include "lvgl.h"
 #include "esp_timer.h"
 #include <esp_heap_caps.h>
-#include "bsp_lcd.h"
-#include "bsp_power.h"
+#include "hal/hal_display.h"
+#include "hal/hal_power.h"
 
-#define TAG "bsp_lcd"
+#define TAG "hal_display"
 
 /* LCD QSPI */
 #define LCD_SPI_HOST    SPI2_HOST
@@ -43,12 +43,12 @@ static volatile bool s_snap_req = false;
 static bool s_snap_active = false;
 static char s_snap_line[LCD_WIDTH * 4 + 32];
 
-void bsp_lcd_snapshot_arm(void)
+void hal_display_snapshot_arm(void)
 {
     s_snap_req = true;
 }
 
-bool bsp_lcd_snapshot_begin_if_requested(void)
+bool hal_display_snapshot_begin_if_requested(void)
 {
     if (s_snap_req && !s_snap_active) {
         s_snap_req = false;
@@ -88,7 +88,7 @@ static const sh8601_lcd_init_cmd_t lcd_init_cmds[] = {
     {0x29, lcd_data_00, 0, 100},
 };
 
-void bsp_lcd_set_backlight(uint8_t brightness)
+void hal_display_set_backlight(uint8_t brightness)
 {
     uint8_t bl_val = (brightness * 255) / 100;
     uint32_t cmd = (0x02 << 24) | (0x51 << 8);
@@ -180,7 +180,7 @@ static void lvgl_rounder_cb(lv_disp_drv_t *disp_drv, lv_area_t *area)
 
 static lv_disp_drv_t disp_drv; // Global static to make it alive permanently
 
-void bsp_lcd_init(void)
+void hal_display_init(void)
 {
     spi_bus_config_t buscfg = {
         .sclk_io_num = LCD_PCLK_GPIO,
@@ -224,7 +224,7 @@ void bsp_lcd_init(void)
     ESP_ERROR_CHECK(ret);
 
     ESP_LOGI(TAG, "Performing LCD power reset...");
-    bsp_power_lcd_reset();
+    hal_power_lcd_reset();
 
     ESP_LOGI(TAG, "Initializing LCD panel...");
     ret = esp_lcd_panel_init(s_lcd_panel);
@@ -233,7 +233,7 @@ void bsp_lcd_init(void)
     ESP_LOGI(TAG, "Turning LCD display on...");
     ESP_ERROR_CHECK(esp_lcd_panel_disp_on_off(s_lcd_panel, true));
 
-    bsp_lcd_set_backlight(100);
+    hal_display_set_backlight(100);
 
     ESP_LOGI(TAG, "LCD initialized");
 

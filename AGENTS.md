@@ -16,18 +16,57 @@
 
 ## 项目地图
 
-- `main/main.c`：app_main 初始化顺序（TF CS 释放、I2C 总线、PMIC、LCD）、gui_task（黑底白字居中「OK」）、USB 调试 console 任务（SNAP/REBOOT 命令）。
-- `main/bsp_power.c`：AXP2101：PMIC 初始化、ALDO3 屏复位时序（屏复位无独立 RST GPIO）。
-- `main/bsp_lcd.c`：QSPI 面板、LVGL 显示驱动、flush_cb（swap_buf 隔离 + 截图流式输出）、背光（0x51 命令）。
-- `main/CMakeLists.txt`：主组件构建配置。新增源文件或依赖时必须修改。
+```
+main/
+├── main.c            # 瘦入口：初始化顺序 + 安装应用 + gui/console 任务
+├── hal/              # 硬件抽象层（HAL）
+│   ├── hal.h         # 聚合入口，上层统一从这里引入
+│   ├── hal_power.*   # AXP2101 电源管理（ALDO3 屏复位）
+│   └── hal_display.* # SH8601 QSPI 面板 + LVGL 驱动 + 截图流式输出 + 背光
+└── apps/             # 应用层
+    ├── apps.{c,h}    # 应用框架：注册表 + 生命周期状态机（主机可测纯 C）
+    ├── common/       # 跨应用共享组件（约定见 common/README.md）
+    ├── app_ok/       # OK 演示应用（含 view/ 子目录）
+    └── app_template/ # 新应用复制模板（不安装、不进固件）
+tests/                # 主机端单元测试（独立 CMake 工程，ctest）
+docs/apps/            # 每个应用一份说明文档（强制，见"分层架构约束"）
+```
+
+- `main/main.c`：app_main 初始化顺序（TF CS 释放、I2C 总线、HAL、安装应用并请求启动默认应用）、gui_task 主循环（截图请求 → `apps_update()` → `lv_timer_handler`）、USB 调试 console 任务（SNAP/REBOOT 命令）。
+- `main/CMakeLists.txt`：主组件构建配置。`hal/` 与 `apps/` 源码按 GLOB_RECURSE 递归收集——**新增/删除源文件后必须 `idf.py reconfigure`**（GLOB 仅在 configure 时求值，直接 build 不会感知新文件）。
 - `main/idf_component.yml`：IDF 组件管理器清单。当前依赖 `espressif/esp_lcd_sh8601` 与 `lvgl/lvgl`。
 - `docs/hardwares/`：硬件规格与参考文档。
 - `docs/firmwares/`：官方固件研究——Waveshare ESP-IDF 示例的目录结构与设备能力清单（蓝牙/BOOT 键官方未实现；触摸方向参数、AXP2101 轨配置等官方事实）。
+- `docs/apps/`：应用说明文档，每个 `app_*` 一份（如 `app_ok.md`）。
 - `managed_components/`：IDF 组件管理器自动下载的依赖（如 `lvgl__lvgl`、`espressif__esp_lcd_sh8601`）。**对 Agent 只读**。
 - `sdkconfig` / `sdkconfig.defaults`：项目 Kconfig 配置。修改后需重新运行 `idf.py reconfigure`。
 - `partitions.csv`：Flash 分区表。当前包含 nvs、phy_init、factory（6M app）。
 
-> 随着功能增长，代码应从 `main.c` 逐步拆分为 `main/` 下的模块化文件（如 `bsp_power.c`、`bsp_lcd.c`）。拆分原则：一个文件聚焦一个子系统，避免 `main.c` 超过 800 行。
+## 分层架构约束
+
+整体对照 [StackChan firmware](https://github.com/m5stack/StackChan/tree/main/firmware)（瘦入口 + `hal/` + `apps/` + `tests/`），层次依赖单向：`apps → hal → 驱动/寄存器`。
+
+### HAL（`main/hal/`，硬件抽象层）
+
+- 一个硬件子系统一个文件：`hal_<subsys>.{c,h}`（电源/显示，未来触摸/音频/IMU/TF…），并统一在 `hal/hal.h` 聚合，上层只 include 聚合头。
+- 对上层只暴露统一接口 `hal_<subsys>_<op>()`，不泄漏驱动句柄与寄存器细节；hal 之间允许互相依赖（如 hal_display 经 hal_power 做屏电源复位）。
+- **apps 层绝不直接 include 驱动头或操作 GPIO/寄存器**——一律经 HAL。
+- 新增硬件子系统：新建 `hal/hal_<subsys>.{c,h}` → 在 hal.h 聚合 → `idf.py reconfigure`。
+
+### apps（`main/apps/`，应用层）
+
+- 每个应用一个 `app_<name>/` 子目录，独立的应用模块。`app_<name>.{c,h}` 只写生命周期回调；**有 UI 的应用必须建 `view/` 子目录**放界面构建/销毁（`view_<name>.{c,h}`），app 主文件不直接调用 LVGL。
+- 生命周期四回调对照 StackChan 的 mooncake AppAbility（契约全文见 `main/apps/apps.h`，模板见 `apps/app_template/`）：
+  `on_create`（安装一次，任意上下文，不得碰 LVGL）→ `on_open`（建 UI）→ `on_running`（gui_task 每循环）→ `on_close`（释放资源）。
+- **所有 LVGL 调用仅限 gui_task 上下文**（on_open/on_running/on_close 天然满足）；其他任务启动/切换应用只能经 `apps_request_open()` 交接，由 gui_task 的 `apps_update()` 消费。
+- 新建应用流程：复制 `apps/app_template/` 为 `apps/app_<name>/` → 在 `main.c` `apps_install()` 注册 → **必须同步写 `docs/apps/<name>.md` 说明文档**（功能、生命周期表、文件构成、验证方式，参照 `docs/apps/app_ok.md`）。
+- 跨应用共享的 UI 组件/工具放 `apps/common/`（约定见其 README.md）；只有一个使用者时留在 app 内，出现第二个使用者再上移。
+
+### tests（根目录 `tests/`，主机端单元测试）
+
+- 独立于 ESP-IDF 的 CMake 工程：`cmake -S tests -B tests/build && cmake --build tests/build && ctest --test-dir tests/build --output-on-failure`。
+- 只测**可在主机编译的纯逻辑模块**（标准 C，无 IDF/LVGL/硬件依赖，参考 `main/apps/apps.c` 的分层做法）；依赖硬件的行为上机用 USB console 命令 + `tools/` 脚本验证。
+- 新增纯逻辑模块时同步加 `test_<module>.c` 与 CMake 条目；修改被测模块后必须跑测试。
 
 ## 环境要求
 
@@ -119,4 +158,5 @@ idf.py set-target esp32c6
 - **验证要求**：
   - 完成功能后，必须执行构建验证：`idf.py build`
   - 若进行了配置变更或依赖变更，执行完整清理构建：`idf.py fullclean && idf.py build`
+  - 修改 `main/apps/apps.c` 等主机可测模块后，运行 `tests/` 测试（命令见 tests/README.md）
   - 在声称完成前，确认编译无错误、无新增警告

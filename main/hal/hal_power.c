@@ -4,9 +4,9 @@
 #include <esp_log.h>
 #include <esp_err.h>
 #include <driver/i2c_master.h>
-#include "bsp_power.h"
+#include "hal/hal_power.h"
 
-#define TAG "bsp_power"
+#define TAG "hal_power"
 
 #define AXP2101_ADDR    0x34
 
@@ -51,7 +51,7 @@ static void axp2101_clr_bit(uint8_t reg, uint8_t bit)
     }
 }
 
-void bsp_power_init(i2c_master_bus_handle_t bus)
+void hal_power_init(i2c_master_bus_handle_t bus)
 {
     i2c_device_config_t dev_cfg = {
         .dev_addr_length = I2C_ADDR_BIT_LEN_7,
@@ -84,7 +84,7 @@ void bsp_power_init(i2c_master_bus_handle_t bus)
     ESP_LOGI(TAG, "PMIC initialized");
 }
 
-void bsp_power_lcd_reset(void)
+void hal_power_lcd_reset(void)
 {
     /* High-Low-High reset sequence (match official Waveshare code) */
     axp2101_set_bit(AXP2101_LDO_ONOFF_CTRL0, 2);  /* Power on */

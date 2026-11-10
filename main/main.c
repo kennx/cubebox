@@ -8,10 +8,9 @@
 #include <driver/gpio.h>
 #include <driver/usb_serial_jtag.h>
 #include "lvgl.h"
-#include "bsp_power.h"
-#include "bsp_lcd.h"
-
-LV_FONT_DECLARE(lv_font_montserrat_48);
+#include "hal/hal.h"
+#include "apps/apps.h"
+#include "apps/app_ok/app_ok.h"
 
 #define TAG "main"
 
@@ -53,7 +52,7 @@ static void console_task(void *arg)
             line[len] = '\0';
             len = 0;
             if (strcmp(line, "SNAP") == 0) {
-                bsp_lcd_snapshot_arm();
+                hal_display_snapshot_arm();
             } else if (strcmp(line, "REBOOT") == 0) {
                 esp_restart();
             }
@@ -65,21 +64,21 @@ static void console_task(void *arg)
     }
 }
 
+/*
+ * gui_task：全固件唯一允许调用 LVGL 的上下文。每循环：
+ *   1. 截图请求 → 强制全屏 invalidate（flush_cb 流出全部条带）
+ *   2. apps_update：消费跨任务的应用切换请求 + 调当前应用 on_running
+ *   3. lv_timer_handler 驱动 LVGL 刷新
+ */
 static void gui_task(void *arg)
 {
-    lv_obj_set_style_bg_color(lv_scr_act(), lv_color_black(), 0);
-
-    lv_obj_t *label = lv_label_create(lv_scr_act());
-    lv_obj_set_style_text_font(label, &lv_font_montserrat_48, 0);
-    lv_obj_set_style_text_color(label, lv_color_white(), 0);
-    lv_label_set_text(label, "OK");
-    lv_obj_center(label);
-
+    (void)arg;
     while (1) {
-        /* 截图请求：强制全屏 invalidate，让 flush_cb 流出全部条带 */
-        if (bsp_lcd_snapshot_begin_if_requested()) {
+        if (hal_display_snapshot_begin_if_requested()) {
             lv_obj_invalidate(lv_scr_act());
         }
+
+        apps_update();
 
         lv_timer_handler();
         vTaskDelay(pdMS_TO_TICKS(10));
@@ -114,8 +113,13 @@ void app_main(void)
     i2c_master_bus_handle_t i2c_bus = NULL;
     ESP_ERROR_CHECK(i2c_new_master_bus(&bus_cfg, &i2c_bus));
 
-    bsp_power_init(i2c_bus);
-    bsp_lcd_init(); /* Initialize LCD + LVGL（内部先经 ALDO3 做屏电源复位） */
+    /* HAL：先电源后显示（显示复位依赖 ALDO3） */
+    hal_power_init(i2c_bus);
+    hal_display_init();
+
+    /* 安装应用，请求启动默认应用（gui_task 首轮 apps_update 消费请求） */
+    apps_install(&app_ok);
+    apps_request_open(app_ok.name);
 
     xTaskCreate(gui_task, "gui_task", 4096 * 2, NULL, 5, NULL);
     xTaskCreate(console_task, "console", 4096, NULL, 5, NULL);
