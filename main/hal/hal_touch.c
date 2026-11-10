@@ -21,26 +21,38 @@
 #define TOUCH_GPIO_RST         11
 #define TOUCH_GPIO_INT         5
 
+/* 连续读取失败上限（约 1.5s @30ms 读周期）：组件 err 路径含 RST 复位 +
+ * vTaskDelay(约 60ms)，持续故障会拖垮 gui_task 的 30ms 节奏——超限即
+ * 停用触摸（一次性降级，重启恢复），保住 UI 主循环。 */
+#define TOUCH_READ_FAIL_LIMIT 50
+
 static esp_lcd_touch_handle_t s_touch = NULL;
+static uint8_t s_read_fail_cnt = 0;
 
 /* LVGL v8 指针输入读取回调（gui_task 的 lv_timer_handler 内周期调用）。
- * I2C 读取失败或无触摸点一律按"本轮无触摸"处理，不报错刷屏。 */
+ * 无触摸点按"本轮无触摸"处理；I2C 读取失败计数降级（见 FAIL_LIMIT）。 */
 static void touch_read_cb(lv_indev_drv_t *drv, lv_indev_data_t *data)
 {
     LV_UNUSED(drv);
+    data->state = LV_INDEV_STATE_REL;
     if (s_touch == NULL) {
-        data->state = LV_INDEV_STATE_REL;
         return;
     }
-    esp_lcd_touch_read_data(s_touch);
+    if (esp_lcd_touch_read_data(s_touch) != ESP_OK) {
+        if (++s_read_fail_cnt >= TOUCH_READ_FAIL_LIMIT) {
+            ESP_LOGW(TAG, "touch read failed %u times, touch disabled until reboot",
+                     s_read_fail_cnt);
+            s_touch = NULL; /* 放弃句柄（组件 err 路径状态未定，不做清理） */
+        }
+        return;
+    }
+    s_read_fail_cnt = 0;
     esp_lcd_touch_point_data_t points[1];
     uint8_t cnt = 0;
     if (esp_lcd_touch_get_data(s_touch, points, &cnt, 1) == ESP_OK && cnt > 0) {
         data->point.x = points[0].x;
         data->point.y = points[0].y;
         data->state = LV_INDEV_STATE_PR;
-    } else {
-        data->state = LV_INDEV_STATE_REL;
     }
 }
 

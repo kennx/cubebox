@@ -81,10 +81,10 @@ const lv_obj_class_t dotmatrix_widget_class = {
 lv_obj_t *dotmatrix_widget_create(lv_obj_t *parent, const dotmatrix_style_t *style)
 {
     lv_obj_t *obj = lv_obj_class_create_obj(&dotmatrix_widget_class, parent);
-    lv_obj_class_init_obj(obj);
     if (obj == NULL) {
-        return NULL;
+        return NULL; /* OOM：必须在 init_obj 解引用之前返回 */
     }
+    lv_obj_class_init_obj(obj);
     if (style != NULL) {
         ((dotmatrix_widget_t *)obj)->style = *style;
     }

@@ -132,7 +132,7 @@ idf.py set-target esp32c6
   - 屏幕背光通过发送命令 `0x51` 调节亮度，无独立 GPIO 控制。
   - 显示屏复位由 AXP2101 ALDO3 控制电源复位，无独立 RST GPIO。
 - **QSPI / SPI 冲突**：LCD（QSPI，4-bit）与 TF 卡（SDSPI，1-bit）共享 CLK/MOSI/MISO GPIO，两者不能同时以最高性能传输，需由软件控制 CS 切换总线访问。典型做法：初始化时上拉 TF CS（GPIO 6）释放总线给 LCD。
-- **Strapping Pins**：GPIO 0~5 已用于 LCD QSPI，GPIO 8~9 已用于 I2C / BOOT 按键。外接设备时注意不要在复位时改变这些引脚电平。
+- **Strapping Pins**：GPIO 0~4 已用于 LCD QSPI（CS=GPIO 15），GPIO 5 为触摸中断 TP_INT，GPIO 8~9 已用于 I2C / BOOT 按键。外接设备时注意不要在复位时改变这些引脚电平。
 - **LVGL 使用规范**：
   - 当前使用 LVGL v8.x。遵循其对象模型，优先使用 `lv_obj_set_style_xxx` 做样式控制。
   - 避免每帧全屏 `lv_obj_invalidate(lv_scr_act())`，改为仅标记变化区域。
