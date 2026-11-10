@@ -120,8 +120,9 @@ CubeBox 固件目前只有一个演示应用 app_ok。本次为它建立"多应�
 
 - `hal_touch_init(i2c_master_bus_handle_t bus);` —— 由 main.c 组合根调用
   （句柄前向声明照抄 hal_power.h 模式）；聚合进 `hal.h`。
-- 实现：`esp_lcd_touch_new_i2c_cst9217()`（I2C 0x5A、INT GPIO 5，组件
-  `espressif/esp_lcd_touch_cst9217` 加入 `idf_component.yml`）→ 创建 `lv_indev`
+- 实现：`esp_lcd_touch_new_i2c_cst9217()`（I2C 0x5A、INT GPIO 5、RST GPIO 11、
+  400kHz、swap_xy+mirror_y——官方 07/08/09 示例实证参数，组件
+  `waveshare/esp_lcd_touch_cst9217` 加入 `idf_component.yml`）→ 创建 `lv_indev`
   （`LV_INDEV_TYPE_POINTER`），read 回调经 `esp_lcd_touch_read()`/`get_points` 填充
   LVGL 点坐标。
 - 触摸坐标方向若与显示不一致（Waveshare 文档提示有方向参数），在 read 回调内
