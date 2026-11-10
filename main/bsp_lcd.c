@@ -29,8 +29,14 @@
 #define LCD_WIDTH       480
 #define LCD_HEIGHT      480
 
-static esp_lcd_panel_io_handle_t lcd_io = NULL;
-static esp_lcd_panel_handle_t lcd_panel = NULL;
+/* flush 缓冲约束链：LVGL 绘制缓冲 DRAW_BUF_LINES 行 → rounder 把 flush 区域
+ * 两侧各扩 1 像素，单次 flush 上限 FLUSH_MAX_LINES 行 → swap_buf 容量与 SPI
+ * DMA max_transfer_sz 都必须覆盖该上限（RGB565 每行 2 字节） */
+#define LCD_DRAW_BUF_LINES    40
+#define LCD_FLUSH_MAX_LINES   (LCD_DRAW_BUF_LINES + 2)
+
+static esp_lcd_panel_io_handle_t s_lcd_io = NULL;
+static esp_lcd_panel_handle_t s_lcd_panel = NULL;
 
 /* 截图调试：请求标志任意任务置位，活动状态仅 gui_task 上下文访问 */
 static volatile bool s_snap_req = false;
@@ -86,7 +92,7 @@ void bsp_lcd_set_backlight(uint8_t brightness)
 {
     uint8_t bl_val = (brightness * 255) / 100;
     uint32_t cmd = (0x02 << 24) | (0x51 << 8);
-    esp_err_t ret = esp_lcd_panel_io_tx_param(lcd_io, cmd, &bl_val, 1);
+    esp_err_t ret = esp_lcd_panel_io_tx_param(s_lcd_io, cmd, &bl_val, 1);
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "Backlight command failed: %s", esp_err_to_name(ret));
     }
@@ -114,9 +120,9 @@ static void lvgl_flush_cb(lv_disp_drv_t *drv, const lv_area_t *area, lv_color_t 
     /* A static swap buffer to isolate the big-endian pixel stream and prevent
      * rounder-induced underflow. draw_bitmap 读取是异步的，期间 LVGL 可能复用
      * 其绘制缓冲，因此必须先拷贝再送显 */
-    static lv_color_t swap_buf[LCD_WIDTH * 60];
-    if (size > LCD_WIDTH * 60) {
-        ESP_LOGE(TAG, "Flush size too large: %lu, max: %d", size, LCD_WIDTH * 60);
+    static lv_color_t swap_buf[LCD_WIDTH * LCD_FLUSH_MAX_LINES];
+    if (size > LCD_WIDTH * LCD_FLUSH_MAX_LINES) {
+        ESP_LOGE(TAG, "Flush size too large: %lu, max: %d", size, LCD_WIDTH * LCD_FLUSH_MAX_LINES);
         lv_disp_flush_ready(drv);
         return;
     }
@@ -182,7 +188,7 @@ void bsp_lcd_init(void)
         .data1_io_num = LCD_D1_GPIO,
         .data2_io_num = LCD_D2_GPIO,
         .data3_io_num = LCD_D3_GPIO,
-        .max_transfer_sz = LCD_WIDTH * 50 * 2,
+        .max_transfer_sz = LCD_WIDTH * LCD_FLUSH_MAX_LINES * 2,
     };
     ESP_ERROR_CHECK(spi_bus_initialize(LCD_SPI_HOST, &buscfg, SPI_DMA_CH_AUTO));
 
@@ -198,7 +204,7 @@ void bsp_lcd_init(void)
             .quad_mode = true,
         },
     };
-    ESP_ERROR_CHECK(esp_lcd_new_panel_io_spi((esp_lcd_spi_bus_handle_t)LCD_SPI_HOST, &io_config, &lcd_io));
+    ESP_ERROR_CHECK(esp_lcd_new_panel_io_spi((esp_lcd_spi_bus_handle_t)LCD_SPI_HOST, &io_config, &s_lcd_io));
 
     sh8601_vendor_config_t vendor_config = {0};
     vendor_config.init_cmds = lcd_init_cmds;
@@ -214,18 +220,18 @@ void bsp_lcd_init(void)
     };
 
     ESP_LOGI(TAG, "Creating SH8601 panel...");
-    esp_err_t ret = esp_lcd_new_panel_sh8601(lcd_io, &panel_config, &lcd_panel);
+    esp_err_t ret = esp_lcd_new_panel_sh8601(s_lcd_io, &panel_config, &s_lcd_panel);
     ESP_ERROR_CHECK(ret);
 
     ESP_LOGI(TAG, "Performing LCD power reset...");
     bsp_power_lcd_reset();
 
     ESP_LOGI(TAG, "Initializing LCD panel...");
-    ret = esp_lcd_panel_init(lcd_panel);
+    ret = esp_lcd_panel_init(s_lcd_panel);
     ESP_ERROR_CHECK(ret);
 
     ESP_LOGI(TAG, "Turning LCD display on...");
-    ESP_ERROR_CHECK(esp_lcd_panel_disp_on_off(lcd_panel, true));
+    ESP_ERROR_CHECK(esp_lcd_panel_disp_on_off(s_lcd_panel, true));
 
     bsp_lcd_set_backlight(100);
 
@@ -235,25 +241,25 @@ void bsp_lcd_init(void)
     lv_init();
 
     /* Allocate buffer for LVGL, using internal DMA capable SRAM */
-    lv_color_t *buf1 = heap_caps_malloc(LCD_WIDTH * 40 * sizeof(lv_color_t), MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL);
+    lv_color_t *buf1 = heap_caps_malloc(LCD_WIDTH * LCD_DRAW_BUF_LINES * sizeof(lv_color_t), MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL);
     assert(buf1 != NULL);
 
     static lv_disp_draw_buf_t disp_buf;
-    lv_disp_draw_buf_init(&disp_buf, buf1, NULL, LCD_WIDTH * 40);
+    lv_disp_draw_buf_init(&disp_buf, buf1, NULL, LCD_WIDTH * LCD_DRAW_BUF_LINES);
 
     lv_disp_drv_init(&disp_drv);
     disp_drv.hor_res = LCD_WIDTH;
     disp_drv.ver_res = LCD_HEIGHT;
     disp_drv.flush_cb = lvgl_flush_cb;
     disp_drv.draw_buf = &disp_buf;
-    disp_drv.user_data = lcd_panel;
+    disp_drv.user_data = s_lcd_panel;
     disp_drv.rounder_cb = lvgl_rounder_cb;
     lv_disp_drv_register(&disp_drv);
 
     const esp_lcd_panel_io_callbacks_t cbs = {
         .on_color_trans_done = notify_lvgl_flush_ready,
     };
-    ESP_ERROR_CHECK(esp_lcd_panel_io_register_event_callbacks(lcd_io, &cbs, &disp_drv));
+    ESP_ERROR_CHECK(esp_lcd_panel_io_register_event_callbacks(s_lcd_io, &cbs, &disp_drv));
 
     /* Set up 2ms high-resolution timer for LVGL tick */
     const esp_timer_create_args_t lvgl_tick_timer_args = {

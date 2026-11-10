@@ -21,8 +21,9 @@ LV_FONT_DECLARE(lv_font_montserrat_48);
 #define I2C_PORT        I2C_NUM_0
 
 /*
- * USB 辅助 console：接收调试命令。主 console 是 UART0，stdin 收不到
- * USB 数据，必须经 usb_serial_jtag 驱动读取。
+ * USB console：接收调试命令。主 console 即 USB-Serial/JTAG（sdkconfig
+ * 配置，ESP_LOG 与命令/截图流共用同一通道）；此处经 usb_serial_jtag
+ * 驱动直读，绕开 console 子系统的行缓冲，读取不受日志输出干扰。
  *   SNAP   — 触发一次全屏截图流（配合 tools/screenshot.py）
  *   REBOOT — 远程重启（抓完整启动日志用）
  */

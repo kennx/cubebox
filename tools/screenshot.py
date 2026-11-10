@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """从 CubeBox 设备抓取屏幕截图。
 
-固件侧在 USB-Serial/JTAG 辅助 console 上提供 SNAP 命令：触发一次全屏
-invalidate，flush_cb 把最终送显像素（含点阵叠绘）按条带以 RGB565 hex
+固件侧在 USB-Serial/JTAG console 上提供 SNAP 命令：触发一次全屏
+invalidate，flush_cb 把最终送显像素按条带以 RGB565 hex
 流出（"#SNAP x1 y1 x2 y2" + hex 行），结尾 "#SNAP END"。
 
 用法：python tools/screenshot.py -p /dev/ttyACM0 -o shot.png [--timeout 60]

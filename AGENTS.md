@@ -24,13 +24,13 @@
 - `docs/hardwares/`：硬件规格与参考文档。
 - `managed_components/`：IDF 组件管理器自动下载的依赖（如 `lvgl__lvgl`、`espressif__esp_lcd_sh8601`）。**对 Agent 只读**。
 - `sdkconfig` / `sdkconfig.defaults`：项目 Kconfig 配置。修改后需重新运行 `idf.py reconfigure`。
-- `partitions.csv`：Flash 分区表。当前包含 nvs、phy_init、factory（6M app）、storage（3M SPIFFS）。
+- `partitions.csv`：Flash 分区表。当前包含 nvs、phy_init、factory（6M app）。
 
 > 随着功能增长，代码应从 `main.c` 逐步拆分为 `main/` 下的模块化文件（如 `bsp_power.c`、`bsp_lcd.c`）。拆分原则：一个文件聚焦一个子系统，避免 `main.c` 超过 800 行。
 
 ## 环境要求
 
-- **ESP-IDF**：`v5.5.1`（项目指定版本）
+- **ESP-IDF**：`v5.5.1`（项目指定版本；本机实际构建为 v5.5.5 patch 漂移，见 `dependencies.lock`）
 - **目标芯片**：`esp32c6`（RISC-V 32-bit 单核，主频高达 160 MHz）
 - **无线**：Wi-Fi 6、蓝牙 5、IEEE 802.15.4 (Zigbee 3.0 / Thread)
 - **存储**：内置 512 KB HP SRAM、16 KB LP SRAM、320 KB ROM，外挂 16 MB NOR-Flash
@@ -112,7 +112,7 @@ idf.py set-target esp32c6
 - **文件读取**：如果 **rg** 可用，优先使用 `rg` / `rg --files`。
 - **代码修改前**：先阅读相关源码和最新的约束文档；设计变更时，优先遵循现有边界和本地模式。
 - **烧录**：日常开发使用 `tools/flash.sh [PORT]` 一键完成编译、烧录。
-- **远程调试（USB 控制台命令，`main.c` 的 console 任务经 USB-Serial/JTAG 辅助 console 接收；主 console 是 UART0，stdin 收不到 USB 数据，不要改用 stdin 读取）**：
+- **远程调试（USB 控制台命令，`main.c` 的 console 任务经 usb_serial_jtag 驱动直读；主 console 即 USB-Serial/JTAG——sdkconfig.defaults 配置，ESP_LOG 与 SNAP 截图流共用同一通道，screenshot.py 已过滤日志行）**：
   - `SNAP` + `tools/screenshot.py -p PORT -o shot.png`：抓取屏幕 PNG（用系统 python 跑，IDF venv 缺 Pillow）。
   - `REBOOT`：远程重启（抓完整启动日志用）。
 - **验证要求**：
