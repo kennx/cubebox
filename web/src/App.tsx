@@ -1,62 +1,45 @@
-/* Task 3 最小连通页：验证 device 层（mock / 真机）。Task 4 换完整 UI。 */
-import { useRef, useState } from "react";
-import {
-  createDevice,
-  type Device,
-  type DeviceConfig,
-  type DeviceInfo,
-} from "./lib/device";
+import { useCallback, useState } from "react";
+import ConfigScreen from "./components/ConfigScreen";
+import ConnectScreen from "./components/ConnectScreen";
+import { createDevice, type Device, type DeviceInfo } from "./lib/device";
+
+type Phase = "idle" | "connecting" | "connected";
 
 export default function App() {
-  const [state, setState] = useState<"idle" | "connecting" | "connected">("idle");
+  const [phase, setPhase] = useState<Phase>("idle");
+  const [error, setError] = useState("");
+  const [device, setDevice] = useState<Device | null>(null);
   const [info, setInfo] = useState<DeviceInfo | null>(null);
-  const [cfg, setCfg] = useState<DeviceConfig | null>(null);
-  const [err, setErr] = useState("");
-  const deviceRef = useRef<Device | null>(null);
 
-  const onConnect = async () => {
-    setErr("");
-    setState("connecting");
+  const reset = useCallback(() => {
+    setPhase("idle");
+    setDevice(null);
+    setInfo(null);
+  }, []);
+
+  const handleConnect = useCallback(async () => {
+    setError("");
+    setPhase("connecting");
     try {
       const d = createDevice();
-      d.onDisconnect(() => {
-        setState("idle");
-        setCfg(null);
-        setInfo(null);
-      });
+      d.onDisconnect(reset); // 拔线 / 保活失败 → 回连接页
       const i = await d.connect();
-      deviceRef.current = d;
+      setDevice(d);
       setInfo(i);
-      setCfg(await d.getCfg());
-      setState("connected");
+      setPhase("connected");
     } catch (e) {
-      setErr(e instanceof Error ? e.message : String(e));
-      setState("idle");
+      setError(e instanceof Error ? e.message : String(e));
+      setPhase("idle");
     }
-  };
+  }, [reset]);
 
-  return (
-    <main style={{ fontFamily: "system-ui", padding: 24 }}>
-      <h1>CubeBox 配置（脚手架页）</h1>
-      {state !== "connected" ? (
-        <>
-          <button onClick={onConnect} disabled={state === "connecting"}>
-            {state === "connecting" ? "连接中…" : "授权并连接"}
-          </button>
-          {err && <p style={{ color: "#c0392b" }}>{err}</p>}
-        </>
-      ) : (
-        <div>
-          <p>已连接 {info?.name} fw={info?.fw}</p>
-          <pre>{JSON.stringify(cfg, null, 2)}</pre>
-          <button
-            onClick={async () => setCfg(await deviceRef.current!.getCfg())}
-          >
-            getCfg()
-          </button>
-          <button onClick={() => deviceRef.current?.disconnect()}>断开</button>
-        </div>
-      )}
-    </main>
-  );
+  const handleDisconnect = useCallback(() => {
+    void device?.disconnect();
+    reset();
+  }, [device, reset]);
+
+  if (phase === "connected" && device && info) {
+    return <ConfigScreen device={device} info={info} onDisconnect={handleDisconnect} />;
+  }
+  return <ConnectScreen busy={phase === "connecting"} error={error} onConnect={handleConnect} />;
 }
