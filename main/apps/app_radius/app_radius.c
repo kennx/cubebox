@@ -43,12 +43,14 @@ static void app_radius_on_running(app_t *app)
     if (app->user_data == NULL) {
         return;
     }
-    if (s_req_radius >= 0) {
-        view_radius_set_radius(app->user_data, s_req_radius);
+    int r = s_req_radius; /* 单次读入局部：消除 volatile 双读差异，收窄读-清窗口 */
+    if (r >= 0) {
+        view_radius_set_radius(app->user_data, r);
         s_req_radius = -1;
     }
-    if (s_req_page >= 0) {
-        view_radius_set_page(app->user_data, s_req_page);
+    int p = s_req_page;
+    if (p >= 0) {
+        view_radius_set_page(app->user_data, p);
         s_req_page = -1;
     }
 }

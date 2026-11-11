@@ -4,6 +4,8 @@
 用法：
     python3 tools/measure_radius.py photo.jpg [-o diag.png] [--thr 200]
 
+依赖：numpy、Pillow。照片自动降采样到长边 2400px（连通域 BFS 是纯 Python
+实现，48MP 原片会内存/时间失控；输出经单应归一化到屏幕坐标，不受降采样影响）。
 前提：设备显示 app_radius 页 0（全白屏），手机正对屏幕拍摄。
 流程：
     1. 高阈值分割屏幕亮区（发光白屏 vs 黑边框；白色外壳漫反射通常低于阈值）
@@ -85,6 +87,8 @@ def fit_line_ransac(pts, iters=500, tol=2.0):
         inl = d < tol
         if best_in is None or inl.sum() > best_in.sum():
             best_in = inl
+    if best_in is None:
+        sys.exit('RANSAC 退化：边点过于集中或共线，无法拟合直线')
     P = pts[best_in]
     cen = P.mean(0)
     _, _, vt = np.linalg.svd(P - cen, full_matrices=False)
@@ -165,6 +169,7 @@ def main():
     args = ap.parse_args()
 
     im = Image.open(args.photo).convert('L')
+    im.thumbnail((2400, 2400))  # 纯 Python BFS 降内存/耗时；输出为屏幕坐标不受影响
     a = np.asarray(im).astype(np.float32)
     print(f'photo: {im.size[0]}x{im.size[1]}')
 
