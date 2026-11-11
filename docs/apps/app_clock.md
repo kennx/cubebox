@@ -5,7 +5,8 @@
 点阵数字时钟（默认第一屏）：23×23 正圆点阵铺满 480×480，背景 #050505、灭点
 #151515、亮点白色；3×5 点阵字模 24 小时制 HH:MM 水平垂直居中（视觉基准：
 项目根目录 `example.svg`），冒号两点 1 秒亮 1 秒灭呼吸。时间源为系统时钟
-（时区 UTC+8，开机约 08:00 起走秒；RTC/SNTP 同步为后续独立工作）。
+`time()` + `localtime_r`（TZ 经网页配置器设置，即时生效）：开机由 PCF85063 RTC
+恢复、联网后经 SNTP 周期校准并写回 RTC（见 `docs/features/ntp-time-sync.md`）。
 
 ## 生命周期
 
@@ -39,6 +40,7 @@ app_clock/
 ## 验证
 
 - 主机端:`ctest`（点阵字体/布局/呼吸等宽，见 `tests/test_dotmatrix.c`）
-- 上机：烧录后屏幕即点阵时钟；`SNAP` + `tools/screenshot.py` 对比
+- 上机：烧录后屏幕即点阵时钟；配置 Wi-Fi + NTP 后 `TIME` 确认同步、`SNAP` 截图核对时间；
+  `SNAP` + `tools/screenshot.py` 对比
   `example.svg`，两次截图冒号一亮一灭（跨翻转边界的半亮半灭撕裂属预期，
   重拍取相位）；左右滑动切至 app_test。

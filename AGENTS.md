@@ -21,9 +21,12 @@ main/
 ├── main.c            # 瘦入口：初始化顺序 + 安装应用 + gui/console 任务
 ├── config_model.*    # 配置模型：字段验证 + JSON 拼装（纯逻辑，主机可测）
 ├── config_store.*    # 配置存储与应用：NVS 持久化 + SETCFG 解析 + 副作用 defer 到 gui_task
+├── time_sync.*       # 时间同步协调：RTC 开机恢复系统时间 + SNTP 配置 + 同步后写回 RTC
 ├── hal/              # 硬件抽象层（HAL）
 │   ├── hal.h         # 聚合入口，上层统一从这里引入
 │   ├── hal_power.*   # AXP2101 电源管理（ALDO3 屏复位）
+│   ├── hal_rtc.*     # PCF85063 RTC（电池走时，存 UTC）
+│   ├── hal_wifi.*    # Wi-Fi STA 连接（幂等凭据应用）+ 附近 AP 扫描
 │   └── hal_display.* # SH8601 QSPI 面板 + LVGL 驱动 + 截图流式输出 + 背光
 └── apps/             # 应用层
     ├── apps.{c,h}    # 应用框架：注册表 + 生命周期状态机（主机可测纯 C）
@@ -39,9 +42,9 @@ docs/apps/            # 每个应用一份说明文档（强制，见"分层架�
 docs/features/        # 功能规格文档（如 web-config.md：USB 配置协议规格）
 ```
 
-- `main/main.c`：app_main 初始化顺序（TF CS 释放、I2C 总线、HAL、config_store_init、安装应用并请求启动默认应用 clock）、gui_task 主循环（截图请求 → `config_store_apply_pending()` → `apps_update()` → `lv_timer_handler`）、USB 调试 console 任务（SNAP/NEXT/REBOOT/PING/GETCFG/SETCFG 命令）。应用安装顺序即左右滑动的切换顺序（clock → test，循环）。
+- `main/main.c`：app_main 初始化顺序（TF CS 释放、I2C 总线、HAL、hal_rtc/hal_wifi/time_sync、config_store_init、安装应用并请求启动默认应用 clock）、gui_task 主循环（截图请求 → `config_store_apply_pending()` → `apps_update()` → `lv_timer_handler`）、USB 调试 console 任务（SNAP/NEXT/REBOOT/PING/GETCFG/SETCFG/SCAN/TIME 命令）。应用安装顺序即左右滑动的切换顺序（clock → test，循环）。
 - `main/CMakeLists.txt`：主组件构建配置。`hal/` 与 `apps/` 源码按 GLOB_RECURSE 递归收集——**新增/删除源文件后必须 `idf.py reconfigure`**（GLOB 仅在 configure 时求值，直接 build 不会感知新文件）；落在 main/ 根的源文件（如 config_*.c）不被 GLOB 覆盖，须显式加入 SRCS。
-- `main/idf_component.yml`：IDF 组件管理器清单。当前依赖 `espressif/esp_lcd_sh8601`、`lvgl/lvgl` 与 `waveshare/esp_lcd_touch_cst9217`。
+- `main/idf_component.yml`：IDF 组件管理器清单。当前依赖 `espressif/esp_lcd_sh8601`、`lvgl/lvgl`、`waveshare/esp_lcd_touch_cst9217` 与 `waveshare/pcf85063a`。
 - `docs/hardwares/`：硬件规格与参考文档。
 - `docs/firmwares/`：官方固件研究——Waveshare ESP-IDF 示例的目录结构与设备能力清单（蓝牙/BOOT 键官方未实现；触摸方向参数、AXP2101 轨配置等官方事实）。
 - `docs/apps/`：应用说明文档，每个 `app_*` 一份（如 `app_clock.md`）。
@@ -163,7 +166,9 @@ idf.py set-target esp32c6
   - `SNAP` + `tools/screenshot.py -p PORT -o shot.png`：抓取屏幕 PNG（用系统 python 跑，IDF venv 缺 Pillow）。
   - `NEXT`：循环切换到下一个已安装应用（触摸失效时的兜底验证途径）。
   - `REBOOT`：远程重启（抓完整启动日志用）。
-  - `PING` / `GETCFG` / `SETCFG {json}`：网页配置器协议（握手 / 读配置 / 部分更新，响应 `#HELLO`/`#CFG`/`#ERR`，配置持久化 NVS，亮度与时区即时生效）。完整规格见 `docs/features/web-config.md`；网页在 `web/`（`tools/deploy-web.sh` 部署 gh-pages）。
+  - `SCAN`：阻塞扫描附近未隐藏 AP（~2-4s），回 `#NETWORKS [{ssid,rssi,secure}]`（网页 Wi-Fi 卡片用）。
+  - `TIME`：回 `#TIME {synced,utc,local}`（设备时间与 NTP 同步状态，网页时钟页用）。
+  - `PING` / `GETCFG` / `SETCFG {json}`：网页配置器协议（握手 / 读配置 / 部分更新，响应 `#HELLO`/`#CFG`/`#ERR`，配置持久化 NVS，亮度/时区即时生效，Wi-Fi/NTP 幂等应用）。完整规格见 `docs/features/web-config.md`；网页在 `web/`（`tools/deploy-web.sh` 部署 gh-pages）。
 - **验证要求**：
   - 完成功能后，必须执行构建验证：`idf.py build`
   - 若进行了配置变更或依赖变更，执行完整清理构建：`idf.py fullclean && idf.py build`
