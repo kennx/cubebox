@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import type { Device, DeviceConfig, DeviceInfo } from "../lib/device";
 import BrightnessCard from "./BrightnessCard";
-import PlaceholderCard from "./PlaceholderCard";
+import TimeCard from "./TimeCard";
 import TimezoneCard from "./TimezoneCard";
 import WifiCard from "./WifiCard";
 
@@ -35,6 +35,9 @@ export default function ConfigScreen({ device, info, onDisconnect }: Props) {
   const saveTz = async (tz: string) => {
     setCfg(await device.setCfg({ tz }));
   };
+  const saveNtp = async (ntpServer: string) => {
+    setCfg(await device.setCfg({ ntp_server: ntpServer }));
+  };
 
   return (
     <div className="app">
@@ -59,20 +62,30 @@ export default function ConfigScreen({ device, info, onDisconnect }: Props) {
             className={`nav-item${page === "clock" ? " active" : ""}`}
             onClick={() => setPage("clock")}
           >
-            时钟 <span className="badge">即将上线</span>
+            时钟
           </button>
         </nav>
         <main className="panel">
           {error && <div className="banner err">{error}</div>}
           {page === "clock" ? (
-            <PlaceholderCard title="时钟配置" />
+            cfg ? (
+              <>
+                <div className="panel-head">
+                  <h1>时钟</h1>
+                  <p className="muted">NTP 校时与设备当前时间</p>
+                </div>
+                <TimeCard device={device} cfg={cfg} onSave={saveNtp} />
+              </>
+            ) : (
+              !error && <p className="muted">读取配置中…</p>
+            )
           ) : cfg ? (
             <>
               <div className="panel-head">
                 <h1>通用配置</h1>
                 <p className="muted">Wi-Fi、屏幕亮度与时区，保存即生效</p>
               </div>
-              <WifiCard cfg={cfg} onSave={saveWifi} />
+              <WifiCard device={device} cfg={cfg} onSave={saveWifi} />
               <BrightnessCard brightness={cfg.brightness} onChange={saveBrightness} />
               <TimezoneCard tz={cfg.tz} onSave={saveTz} />
             </>

@@ -1,7 +1,7 @@
 /*
  * 设备通信层：Web Serial 真机实现 + localStorage mock 实现（同一 Device 接口）。
- * 协议（proto 1）：UTF-8 行文本，命令行 PING/GETCFG/SETCFG <json>；
- * 响应行 # 前缀（#HELLO/#CFG/#ERR），其余行（ESP_LOG）为噪声直接丢弃。
+ * 协议（proto 2）：UTF-8 行文本，命令行 PING/GETCFG/SETCFG <json>/SCAN/TIME；
+ * 响应行 # 前缀（#HELLO/#CFG/#ERR/#NETWORKS/#TIME），其余行（ESP_LOG）为噪声直接丢弃。
  * 规格见 docs/features/web-config.md。
  */
 
@@ -16,6 +16,7 @@ export interface DeviceConfig {
   tz: string;
   wifi_ssid: string;
   wifi_pass_set: boolean;
+  ntp_server: string;
 }
 
 export interface ConfigPatch {
@@ -23,6 +24,21 @@ export interface ConfigPatch {
   tz?: string;
   wifi_ssid?: string;
   wifi_pass?: string;
+  ntp_server?: string;
+}
+
+/** SCAN 结果条目（按信号强度降序，未隐藏 AP） */
+export interface WifiNetwork {
+  ssid: string;
+  rssi: number;
+  secure: boolean;
+}
+
+/** TIME 响应：本次运行是否已 NTP 同步 + 设备侧 UTC/本地时间 */
+export interface TimeInfo {
+  synced: boolean;
+  utc: number;
+  local: string;
 }
 
 export interface Device {
@@ -32,6 +48,10 @@ export interface Device {
   getCfg(): Promise<DeviceConfig>;
   /** 部分更新；任一字段非法时设备整体拒绝，此处抛错；成功返回新状态 */
   setCfg(patch: ConfigPatch): Promise<DeviceConfig>;
+  /** 扫描附近未隐藏 AP（设备阻塞扫描 ~2-4s，超时 15s；结果按信号强度降序） */
+  scan(): Promise<WifiNetwork[]>;
+  /** 查询设备时间与同步状态 */
+  getTime(): Promise<TimeInfo>;
   /** 设备拔线 / 保活连续 2 次失败 / disconnect 事件时回调（只触发一次） */
   onDisconnect(cb: () => void): void;
 }
@@ -121,6 +141,17 @@ class SerialDevice implements Device {
       this.request(`SETCFG ${JSON.stringify(patch)}`, "#CFG", 3000),
     );
     return JSON.parse(line.slice("#CFG ".length)) as DeviceConfig;
+  }
+
+  async scan(): Promise<WifiNetwork[]> {
+    /* 设备阻塞扫描 ~2-4s：长超时；请求经 enqueue 串行，心跳 PING 排队其后不受影响 */
+    const line = await this.enqueue(() => this.request("SCAN", "#NETWORKS", 15000));
+    return JSON.parse(line.slice("#NETWORKS ".length)) as WifiNetwork[];
+  }
+
+  async getTime(): Promise<TimeInfo> {
+    const line = await this.enqueue(() => this.request("TIME", "#TIME", 3000));
+    return JSON.parse(line.slice("#TIME ".length)) as TimeInfo;
   }
 
   /* ---- 内部 ---- */
@@ -257,6 +288,7 @@ const MOCK_DEFAULTS: MockState = {
   tz: "CST-8",
   wifi_ssid: "",
   wifi_pass: "",
+  ntp_server: "ntp.aliyun.com",
 };
 
 /** 与固件 config_model 相同的验证规则（ssid/pass 允许可打印 ASCII 与合法 UTF-8，字节计长） */
@@ -278,6 +310,9 @@ function mockValidate(patch: ConfigPatch): void {
     if (byteLen(patch.wifi_pass) > 64 || !noControl(patch.wifi_pass))
       throw new Error("bad field: wifi_pass");
   }
+  if (patch.ntp_server !== undefined) {
+    if (!/^[A-Za-z0-9.:-]{1,63}$/.test(patch.ntp_server)) throw new Error("bad field: ntp_server");
+  }
 }
 
 class MockDevice implements Device {
@@ -291,7 +326,7 @@ class MockDevice implements Device {
   async connect(): Promise<DeviceInfo> {
     await sleep(MOCK_DELAY_MS);
     this.connected = true;
-    return { name: "CubeBox", fw: "0.3.0-mock", proto: 1 };
+    return { name: "CubeBox", fw: "0.3.0-mock", proto: 2 };
   }
 
   async disconnect(): Promise<void> {
@@ -307,6 +342,7 @@ class MockDevice implements Device {
       tz: s.tz,
       wifi_ssid: s.wifi_ssid,
       wifi_pass_set: s.wifi_pass !== "",
+      ntp_server: s.ntp_server,
     };
   }
 
@@ -321,6 +357,32 @@ class MockDevice implements Device {
       tz: s.tz,
       wifi_ssid: s.wifi_ssid,
       wifi_pass_set: s.wifi_pass !== "",
+      ntp_server: s.ntp_server,
+    };
+  }
+
+  async scan(): Promise<WifiNetwork[]> {
+    this.assertConnected();
+    await sleep(800); /* 模拟设备阻塞扫描 */
+    return [
+      { ssid: "Home_5G", rssi: -46, secure: true },
+      { ssid: "Home_2.4G", rssi: -58, secure: true },
+      { ssid: "邻居家的 Wi-Fi", rssi: -72, secure: true },
+      { ssid: "CoffeeShop-Free", rssi: -81, secure: false },
+    ];
+  }
+
+  async getTime(): Promise<TimeInfo> {
+    this.assertConnected();
+    await sleep(MOCK_DELAY_MS);
+    const s = this.load();
+    const now = new Date();
+    const p2 = (n: number) => String(n).padStart(2, "0");
+    return {
+      /* 演示语义：配好 Wi-Fi + NTP 服务器即视为已同步 */
+      synced: s.wifi_ssid !== "" && s.ntp_server !== "",
+      utc: Math.floor(now.getTime() / 1000),
+      local: `${now.getFullYear()}-${p2(now.getMonth() + 1)}-${p2(now.getDate())} ${p2(now.getHours())}:${p2(now.getMinutes())}:${p2(now.getSeconds())}`,
     };
   }
 
