@@ -18,6 +18,7 @@
 #include "apps/common/swipe_nav/swipe_nav.h"
 #include "apps/app_clock/app_clock.h"
 #include "apps/app_test/app_test.h"
+#include "apps/app_radius/app_radius.h"
 
 #define TAG "main"
 
@@ -32,6 +33,8 @@
  * 驱动直读，绕开 console 子系统的行缓冲，读取不受日志输出干扰。
  *   SNAP            — 触发一次全屏截图流（配合 tools/screenshot.py）
  *   NEXT            — 循环切换到下一个已安装应用（触摸失效时的兜底验证途径）
+ *   RAD <px>        — 设置 app_radius 可调单弧半径（1-240）并切到该页
+ *   PAGE <n>        — app_radius 直接跳页 0 白屏/1 刻度/2 可调弧
  *   REBOOT          — 远程重启（抓完整启动日志用）
  *   PING            — 配对握手：回 #HELLO {name,fw,proto}（网页配置器用）
  *   GETCFG          — 回 #CFG {brightness,tz,wifi_ssid,wifi_pass_set,ntp_server}
@@ -74,6 +77,22 @@ static void console_task(void *arg)
                 hal_display_snapshot_arm();
             } else if (strcmp(line, "NEXT") == 0) {
                 swipe_nav_step(1); /* 循环切下一个已安装应用（触摸失效时的兜底） */
+            } else if (strncmp(line, "RAD ", 4) == 0) {
+                int r = atoi(line + 4);
+                if (r >= 1 && r <= 240) {
+                    app_radius_request_radius(r); /* gui_task 的 on_running 消费 */
+                    n = snprintf(resp, sizeof(resp), "#RAD %d\n", r);
+                } else {
+                    n = snprintf(resp, sizeof(resp), "#ERR radius 1-240\n");
+                }
+            } else if (strncmp(line, "PAGE ", 5) == 0) {
+                int p = atoi(line + 5);
+                if (p >= 0 && p <= 2) {
+                    app_radius_request_page(p);
+                    n = snprintf(resp, sizeof(resp), "#PAGE %d\n", p);
+                } else {
+                    n = snprintf(resp, sizeof(resp), "#ERR page 0-2\n");
+                }
             } else if (strcmp(line, "REBOOT") == 0) {
                 esp_restart();
             } else if (strcmp(line, "PING") == 0) {
@@ -194,6 +213,9 @@ void app_main(void)
     }
     if (!apps_install(&app_test)) {
         ESP_LOGE(TAG, "apps_install(app_test) failed (table full or duplicate)");
+    }
+    if (!apps_install(&app_radius)) { /* 圆角测量研究工具（docs/apps/app_radius.md） */
+        ESP_LOGE(TAG, "apps_install(app_radius) failed (table full or duplicate)");
     }
     apps_request_open(app_clock.name);
 
