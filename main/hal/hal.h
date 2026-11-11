@@ -6,3 +6,5 @@
 #include "hal/hal_power.h"
 #include "hal/hal_display.h"
 #include "hal/hal_touch.h"
+#include "hal/hal_rtc.h"
+#include "hal/hal_wifi.h"
