@@ -13,6 +13,7 @@
 #include "lvgl.h"
 #include "hal/hal.h"
 #include "config_store.h"
+#include "time_sync.h"
 #include "apps/apps.h"
 #include "apps/common/swipe_nav/swipe_nav.h"
 #include "apps/app_clock/app_clock.h"
@@ -33,8 +34,10 @@
  *   NEXT            — 循环切换到下一个已安装应用（触摸失效时的兜底验证途径）
  *   REBOOT          — 远程重启（抓完整启动日志用）
  *   PING            — 配对握手：回 #HELLO {name,fw,proto}（网页配置器用）
- *   GETCFG          — 回 #CFG {brightness,tz,wifi_ssid,wifi_pass_set}
+ *   GETCFG          — 回 #CFG {brightness,tz,wifi_ssid,wifi_pass_set,ntp_server}
  *   SETCFG {json}   — 部分更新配置：回 #CFG {新状态} 或 #ERR {原因}
+ *   SCAN            — 阻塞扫描附近未隐藏 AP（~2-4s）：回 #NETWORKS [{ssid,rssi,secure}]
+ *   TIME            — 回 #TIME {synced,utc,local}（网页时钟页显示用）
  * 协议响应统一 # 前缀，与 ESP_LOG 行区分（规格见 docs/features/web-config.md）。
  */
 static void console_task(void *arg)
@@ -50,9 +53,10 @@ static void console_task(void *arg)
     }
 
     /* 行缓冲覆盖最大合法 SETCFG 载荷（~130B）；超长行截断 → JSON 解析失败 → #ERR。
-     * GETCFG/SETCFG 成功时把 json 复用 line 缓冲（此时命令已消费完毕） */
+     * GETCFG/SETCFG 成功时把 json 复用 line 缓冲（此时命令已消费完毕）。
+     * resp 容纳 #NETWORKS（16 条 AP × 最坏 ~100B ≈ 1.2KB）< USB tx 环形缓冲 4096B */
     char line[512];
-    char resp[520]; /* "#CFG " + json(≤~360) + "\n"，或 #ERR 短语 */
+    char resp[2048];
     size_t len = 0;
     uint8_t ch;
     while (1) {
@@ -73,7 +77,7 @@ static void console_task(void *arg)
             } else if (strcmp(line, "REBOOT") == 0) {
                 esp_restart();
             } else if (strcmp(line, "PING") == 0) {
-                n = snprintf(resp, sizeof(resp), "#HELLO {\"name\":\"CubeBox\",\"fw\":\"%s\",\"proto\":1}\n",
+                n = snprintf(resp, sizeof(resp), "#HELLO {\"name\":\"CubeBox\",\"fw\":\"%s\",\"proto\":2}\n",
                              esp_app_get_description()->version);
             } else if (strcmp(line, "GETCFG") == 0) {
                 n = snprintf(resp, sizeof(resp), "#CFG %s\n",
@@ -86,6 +90,25 @@ static void console_task(void *arg)
                 } else {
                     n = snprintf(resp, sizeof(resp), "#ERR %s\n", err);
                 }
+            } else if (strcmp(line, "SCAN") == 0) {
+                /* 阻塞到扫描完成（~2-4s）：网页端请求串行化，后续命令排队，心跳不受影响 */
+                n = snprintf(resp, sizeof(resp), "#NETWORKS ");
+                if (hal_wifi_scan(resp + n, sizeof(resp) - n - 1)) {
+                    n += (int)strlen(resp + n);
+                    resp[n++] = '\n';
+                    resp[n] = '\0';
+                } else {
+                    n = snprintf(resp, sizeof(resp), "#ERR wifi busy\n");
+                }
+            } else if (strcmp(line, "TIME") == 0) {
+                time_t now = time(NULL);
+                struct tm local;
+                localtime_r(&now, &local);
+                n = snprintf(resp, sizeof(resp),
+                             "#TIME {\"synced\":%s,\"utc\":%lld,\"local\":\"%04d-%02d-%02d %02d:%02d:%02d\"}\n",
+                             time_sync_is_synced() ? "true" : "false", (long long)now,
+                             local.tm_year + 1900, local.tm_mon + 1, local.tm_mday,
+                             local.tm_hour, local.tm_min, local.tm_sec);
             }
             if (n > 0) {
                 usb_serial_jtag_write_bytes(resp, n, pdMS_TO_TICKS(1000));
@@ -101,7 +124,7 @@ static void console_task(void *arg)
 /*
  * gui_task：全固件唯一允许调用 LVGL 的上下文。每循环：
  *   1. 截图请求 → 强制全屏 invalidate（flush_cb 流出全部条带）
- *   2. config_store_apply_pending：消费配置副作用（亮度/tz，console 置位）
+ *   2. config_store_apply_pending：消费配置副作用（亮度/tz/Wi-Fi/NTP，console 置位）
  *   3. apps_update：消费跨任务的应用切换请求 + 调当前应用 on_running
  *   4. lv_timer_handler 驱动 LVGL 刷新
  */
@@ -150,13 +173,20 @@ void app_main(void)
     i2c_master_bus_handle_t i2c_bus = NULL;
     ESP_ERROR_CHECK(i2c_new_master_bus(&bus_cfg, &i2c_bus));
 
-    /* HAL：先电源后显示（显示复位依赖 ALDO3），再触摸（失败不致命） */
+    /* HAL：先电源后显示（显示复位依赖 ALDO3），再触摸/RTC（失败不致命） */
     hal_power_init(i2c_bus);
     hal_display_init();
     hal_touch_init(i2c_bus);
+    hal_rtc_init(i2c_bus);
 
-    /* 配置：NVS 读取 + 置 pending，gui_task 首轮应用（亮度/tz，含开机默认时区 CST-8） */
+    /* 配置：NVS 读取 + 置 pending，gui_task 首轮应用（亮度/tz/Wi-Fi/NTP，含开机默认值）。
+     * 必须先于 hal_wifi_init：esp_wifi 内部依赖 NVS（osi_nvs） */
     config_store_init();
+
+    /* 网络 + 时间：STA 启动（不连接，凭据经 apply_pending 幂等应用）、SNTP 回调注册、
+     * RTC 恢复系统时间（电池走时，重启不丢） */
+    hal_wifi_init();
+    time_sync_init();
 
     /* 安装应用（安装顺序即左右滑动的切换顺序），默认启动点阵时钟 */
     if (!apps_install(&app_clock)) {
@@ -168,5 +198,5 @@ void app_main(void)
     apps_request_open(app_clock.name);
 
     xTaskCreate(gui_task, "gui_task", 4096 * 2, NULL, 5, NULL);
-    xTaskCreate(console_task, "console", 6144, NULL, 5, NULL); /* 行/响应缓冲 ~1.1KB */
+    xTaskCreate(console_task, "console", 8192, NULL, 5, NULL); /* 行/响应缓冲 ~2.6KB（#NETWORKS） */
 }

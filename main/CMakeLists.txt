@@ -5,7 +5,7 @@ file(GLOB_RECURSE MAIN_MODULE_SOURCES
     "apps/*.c"
 )
 
-idf_component_register(SRCS main.c config_model.c config_store.c ${MAIN_MODULE_SOURCES}
+idf_component_register(SRCS main.c config_model.c config_store.c time_sync.c ${MAIN_MODULE_SOURCES}
                     INCLUDE_DIRS "."
                     REQUIRES driver esp_lcd espressif__esp_lcd_sh8601 esp_driver_usb_serial_jtag esp_timer lvgl__lvgl
-                             nvs_flash json app_update)
+                             nvs_flash json app_update esp_wifi esp_netif esp_event)

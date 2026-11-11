@@ -11,15 +11,17 @@
 #include "config_model.h"
 #include "config_store.h"
 #include "hal/hal.h"
+#include "time_sync.h"
 
 #define TAG "config_store"
 
-/* NVS key 上限 15 字符；namespace 无此限制 */
+/* NVS key 上限 15 字节；namespace 无此限制 */
 #define CFG_NVS_NS     "cubebox"
 #define CFG_KEY_BRIGHT "bright"
 #define CFG_KEY_TZ     "tz"
 #define CFG_KEY_SSID   "wifi_ssid"
 #define CFG_KEY_PASS   "wifi_pass"
+#define CFG_KEY_NTP    "ntp_server"
 
 static config_model_t s_cfg;
 /* console_task 置位 / gui_task 清零：单字节 bool 读写天然原子（对照 s_snap_req） */
@@ -61,6 +63,10 @@ void config_store_init(void)
     len = sizeof(buf);
     if (nvs_get_str(h, CFG_KEY_PASS, buf, &len) == ESP_OK) {
         config_model_set_string(&s_cfg, "wifi_pass", buf);
+    }
+    len = sizeof(buf);
+    if (nvs_get_str(h, CFG_KEY_NTP, buf, &len) == ESP_OK) {
+        config_model_set_string(&s_cfg, "ntp_server", buf);
     }
     nvs_close(h);
 
@@ -119,6 +125,9 @@ bool config_store_set_json(const char *json, char *err, size_t err_len)
         if ((ret = nvs_set_str(h, CFG_KEY_PASS, tmp.wifi_pass)) != ESP_OK) {
             break;
         }
+        if ((ret = nvs_set_str(h, CFG_KEY_NTP, tmp.ntp_server)) != ESP_OK) {
+            break;
+        }
         ret = nvs_commit(h);
     } while (0);
     nvs_close(h);
@@ -141,6 +150,9 @@ void config_store_apply_pending(void)
     setenv("TZ", s_cfg.tz, 1);
     tzset();
     hal_display_set_backlight(s_cfg.brightness);
+    /* Wi-Fi 凭据与 NTP 服务器均幂等：内部对比当前值，未变化不重连/重配 SNTP */
+    hal_wifi_apply_credentials(s_cfg.wifi_ssid, s_cfg.wifi_pass);
+    time_sync_configure(s_cfg.ntp_server);
 }
 
 const char *config_store_get_json(char *buf, size_t buf_len)
