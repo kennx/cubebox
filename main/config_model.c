@@ -29,6 +29,25 @@ static bool tz_valid(const char *s)
     return true;
 }
 
+/* NTP 服务器：域名 / IPv4 / IPv6 字符集（字母数字 . : -） */
+static bool ntp_host_valid(const char *s)
+{
+    size_t n = strlen(s);
+    if (n < 1 || n > sizeof(((config_model_t *)0)->ntp_server) - 1) {
+        return false;
+    }
+    for (size_t i = 0; i < n; i++) {
+        char c = s[i];
+        if ((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9')) {
+            continue;
+        }
+        if (strchr(".:-", c) == NULL) {
+            return false;
+        }
+    }
+    return true;
+}
+
 /* 合法 UTF-8 多字节序列：返回序列字节数，非法返回 0（拒绝孤立续字节/截断/超长/代理对） */
 static size_t utf8_seq_len(const unsigned char *s, size_t remain)
 {
@@ -93,11 +112,13 @@ void config_model_defaults(config_model_t *cfg)
     strcpy(cfg->tz, "CST-8");
     cfg->wifi_ssid[0] = '\0';
     cfg->wifi_pass[0] = '\0';
+    strcpy(cfg->ntp_server, "ntp.aliyun.com");
 }
 
 static bool is_string_key(const char *key)
 {
-    return strcmp(key, "tz") == 0 || strcmp(key, "wifi_ssid") == 0 || strcmp(key, "wifi_pass") == 0;
+    return strcmp(key, "tz") == 0 || strcmp(key, "wifi_ssid") == 0 || strcmp(key, "wifi_pass") == 0
+           || strcmp(key, "ntp_server") == 0;
 }
 
 bool config_model_key_type(const char *key, config_model_type_t *out)
@@ -156,6 +177,13 @@ bool config_model_set_string(config_model_t *cfg, const char *key, const char *v
             return false;
         }
         snprintf(cfg->wifi_pass, sizeof(cfg->wifi_pass), "%s", value);
+        return true;
+    }
+    if (strcmp(key, "ntp_server") == 0) {
+        if (!ntp_host_valid(value)) {
+            return false;
+        }
+        snprintf(cfg->ntp_server, sizeof(cfg->ntp_server), "%s", value);
         return true;
     }
     if (strcmp(key, "brightness") == 0) {
@@ -228,6 +256,8 @@ void config_model_to_json(const config_model_t *cfg, char *buf, size_t len)
     append_escaped(buf, len, &pos, cfg->wifi_ssid);
     append_str(buf, len, &pos, "\",\"wifi_pass_set\":");
     append_str(buf, len, &pos, cfg->wifi_pass[0] != '\0' ? "true" : "false");
-    append_str(buf, len, &pos, "}");
+    append_str(buf, len, &pos, ",\"ntp_server\":\"");
+    append_escaped(buf, len, &pos, cfg->ntp_server);
+    append_str(buf, len, &pos, "\"}");
     buf[pos] = '\0';
 }

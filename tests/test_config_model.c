@@ -43,6 +43,7 @@ int main(void)
     expect_str(cfg.tz, "CST-8", "default tz CST-8");
     expect_str(cfg.wifi_ssid, "", "default ssid empty");
     expect_str(cfg.wifi_pass, "", "default pass empty");
+    expect_str(cfg.ntp_server, "ntp.aliyun.com", "default ntp_server");
 
     /* ---- set_number: brightness ---- */
     expect(config_model_set_number(&cfg, "brightness", 0) == true, "brightness 0 accepted");
@@ -112,6 +113,29 @@ int main(void)
         expect(config_model_set_string(&cfg, "wifi_ssid", u) == false, "ssid 33 UTF-8 bytes rejected");
     }
 
+    /* ---- set_string: ntp_server（域名 / IPv4 / IPv6） ---- */
+    expect(config_model_set_string(&cfg, "ntp_server", "ntp.aliyun.com") == true, "ntp domain accepted");
+    expect(config_model_set_string(&cfg, "ntp_server", "time.windows.com") == true, "ntp long domain accepted");
+    expect(config_model_set_string(&cfg, "ntp_server", "192.168.1.1") == true, "ntp IPv4 accepted");
+    expect(config_model_set_string(&cfg, "ntp_server", "2400:3200::1") == true, "ntp IPv6 accepted");
+    expect(config_model_set_string(&cfg, "ntp_server", "ntp") == true, "ntp bare label accepted");
+    expect_str(cfg.ntp_server, "ntp", "ntp stored");
+    expect(config_model_set_string(&cfg, "ntp_server", "") == false, "ntp empty rejected");
+    expect(config_model_set_string(&cfg, "ntp_server", "a b") == false, "ntp space rejected");
+    expect(config_model_set_string(&cfg, "ntp_server", "ntp@ex.com") == false, "ntp @ rejected");
+    expect(config_model_set_string(&cfg, "ntp_server", "ntp\x01") == false, "ntp control char rejected");
+    expect(config_model_set_string(&cfg, "ntp_server", "pool_\x80") == false, "ntp high byte rejected");
+    expect_str(cfg.ntp_server, "ntp", "ntp unchanged after rejects");
+    {
+        char ntp64[65];
+        memset(ntp64, 'a', sizeof(ntp64));
+        ntp64[63] = '\0';
+        expect(config_model_set_string(&cfg, "ntp_server", ntp64) == true, "ntp 63 chars accepted");
+        ntp64[63] = 'a';
+        ntp64[64] = '\0';
+        expect(config_model_set_string(&cfg, "ntp_server", ntp64) == false, "ntp 64 chars rejected");
+    }
+
     /* ---- set_string: 未知 key 忽略 ---- */
     expect(config_model_set_string(&cfg, "nope", "x") == true, "unknown string key ignored");
 
@@ -119,6 +143,7 @@ int main(void)
     expect(config_model_set_number(&cfg, "tz", 8) == false, "set_number on string key rejected");
     expect(config_model_set_number(&cfg, "wifi_ssid", 1) == false, "set_number on ssid rejected");
     expect(config_model_set_number(&cfg, "wifi_pass", 1) == false, "set_number on pass rejected");
+    expect(config_model_set_number(&cfg, "ntp_server", 1) == false, "set_number on ntp_server rejected");
     expect(config_model_set_string(&cfg, "brightness", "40") == false, "set_string on number key rejected");
     expect(cfg.brightness == 100 && cfg.brightness != 40, "brightness unchanged by type mismatch");
 
@@ -131,13 +156,18 @@ int main(void)
     config_model_defaults(&cfg);
     char json[512];
     config_model_to_json(&cfg, json, sizeof(json));
-    expect_str(json, "{\"brightness\":100,\"tz\":\"CST-8\",\"wifi_ssid\":\"\",\"wifi_pass_set\":false}",
+    expect_str(json,
+               "{\"brightness\":100,\"tz\":\"CST-8\",\"wifi_ssid\":\"\",\"wifi_pass_set\":false,"
+               "\"ntp_server\":\"ntp.aliyun.com\"}",
                "to_json defaults exact");
 
     config_model_set_string(&cfg, "wifi_ssid", "Home");
     config_model_set_string(&cfg, "wifi_pass", "p");
+    config_model_set_string(&cfg, "ntp_server", "cn.pool.ntp.org");
     config_model_to_json(&cfg, json, sizeof(json));
-    expect_str(json, "{\"brightness\":100,\"tz\":\"CST-8\",\"wifi_ssid\":\"Home\",\"wifi_pass_set\":true}",
+    expect_str(json,
+               "{\"brightness\":100,\"tz\":\"CST-8\",\"wifi_ssid\":\"Home\",\"wifi_pass_set\":true,"
+               "\"ntp_server\":\"cn.pool.ntp.org\"}",
                "to_json pass_set true when pass nonempty");
 
     /* 转义路径：setter 合法写入含引号/反斜杠的 ssid（规格 Review Focus #1 回环要求）；
