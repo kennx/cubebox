@@ -9,8 +9,10 @@
 #include <driver/i2c_master.h>
 #include <driver/gpio.h>
 #include <driver/usb_serial_jtag.h>
+#include <esp_app_desc.h>
 #include "lvgl.h"
 #include "hal/hal.h"
+#include "config_store.h"
 #include "apps/apps.h"
 #include "apps/common/swipe_nav/swipe_nav.h"
 #include "apps/app_clock/app_clock.h"
@@ -27,9 +29,13 @@
  * USB console：接收调试命令。主 console 即 USB-Serial/JTAG（sdkconfig
  * 配置，ESP_LOG 与命令/截图流共用同一通道）；此处经 usb_serial_jtag
  * 驱动直读，绕开 console 子系统的行缓冲，读取不受日志输出干扰。
- *   SNAP   — 触发一次全屏截图流（配合 tools/screenshot.py）
- *   NEXT   — 循环切换到下一个已安装应用（触摸失效时的兜底验证途径）
- *   REBOOT — 远程重启（抓完整启动日志用）
+ *   SNAP            — 触发一次全屏截图流（配合 tools/screenshot.py）
+ *   NEXT            — 循环切换到下一个已安装应用（触摸失效时的兜底验证途径）
+ *   REBOOT          — 远程重启（抓完整启动日志用）
+ *   PING            — 配对握手：回 #HELLO {name,fw,proto}（网页配置器用）
+ *   GETCFG          — 回 #CFG {brightness,tz,wifi_ssid,wifi_pass_set}
+ *   SETCFG {json}   — 部分更新配置：回 #CFG {新状态} 或 #ERR {原因}
+ * 协议响应统一 # 前缀，与 ESP_LOG 行区分（规格见 docs/features/web-config.md）。
  */
 static void console_task(void *arg)
 {
@@ -43,7 +49,10 @@ static void console_task(void *arg)
         return;
     }
 
-    char line[16];
+    /* 行缓冲覆盖最大合法 SETCFG 载荷（~130B）；超长行截断 → JSON 解析失败 → #ERR。
+     * GETCFG/SETCFG 成功时把 json 复用 line 缓冲（此时命令已消费完毕） */
+    char line[512];
+    char resp[520]; /* "#CFG " + json(≤~360) + "\n"，或 #ERR 短语 */
     size_t len = 0;
     uint8_t ch;
     while (1) {
@@ -56,12 +65,30 @@ static void console_task(void *arg)
         if (ch == '\n') {
             line[len] = '\0';
             len = 0;
+            int n = 0;
             if (strcmp(line, "SNAP") == 0) {
                 hal_display_snapshot_arm();
             } else if (strcmp(line, "NEXT") == 0) {
                 swipe_nav_step(1); /* 循环切下一个已安装应用（触摸失效时的兜底） */
             } else if (strcmp(line, "REBOOT") == 0) {
                 esp_restart();
+            } else if (strcmp(line, "PING") == 0) {
+                n = snprintf(resp, sizeof(resp), "#HELLO {\"name\":\"CubeBox\",\"fw\":\"%s\",\"proto\":1}\n",
+                             esp_app_get_description()->version);
+            } else if (strcmp(line, "GETCFG") == 0) {
+                n = snprintf(resp, sizeof(resp), "#CFG %s\n",
+                             config_store_get_json(line, sizeof(line)));
+            } else if (strncmp(line, "SETCFG ", 7) == 0) {
+                char err[96];
+                if (config_store_set_json(line + 7, err, sizeof(err))) {
+                    n = snprintf(resp, sizeof(resp), "#CFG %s\n",
+                                 config_store_get_json(line, sizeof(line)));
+                } else {
+                    n = snprintf(resp, sizeof(resp), "#ERR %s\n", err);
+                }
+            }
+            if (n > 0) {
+                usb_serial_jtag_write_bytes(resp, n, pdMS_TO_TICKS(1000));
             }
             continue;
         }
@@ -74,8 +101,9 @@ static void console_task(void *arg)
 /*
  * gui_task：全固件唯一允许调用 LVGL 的上下文。每循环：
  *   1. 截图请求 → 强制全屏 invalidate（flush_cb 流出全部条带）
- *   2. apps_update：消费跨任务的应用切换请求 + 调当前应用 on_running
- *   3. lv_timer_handler 驱动 LVGL 刷新
+ *   2. config_store_apply_pending：消费配置副作用（亮度/tz，console 置位）
+ *   3. apps_update：消费跨任务的应用切换请求 + 调当前应用 on_running
+ *   4. lv_timer_handler 驱动 LVGL 刷新
  */
 static void gui_task(void *arg)
 {
@@ -84,6 +112,8 @@ static void gui_task(void *arg)
         if (hal_display_snapshot_begin_if_requested()) {
             lv_obj_invalidate(lv_scr_act());
         }
+
+        config_store_apply_pending();
 
         apps_update();
 
@@ -94,11 +124,6 @@ static void gui_task(void *arg)
 
 void app_main(void)
 {
-    /* 时区 UTC+8：app_clock 按本地时间走秒（系统时钟未同步时开机 08:00 起，
-     * RTC/SNTP 同步为后续独立工作） */
-    setenv("TZ", "CST-8", 1);
-    tzset();
-
     /* Pull up TF card CS (GPIO 6) to disable TF card and release the shared SPI/QSPI bus lines */
     gpio_config_t tf_cs_cfg = {
         .pin_bit_mask = 1ULL << 6,
@@ -130,6 +155,9 @@ void app_main(void)
     hal_display_init();
     hal_touch_init(i2c_bus);
 
+    /* 配置：NVS 读取 + 置 pending，gui_task 首轮应用（亮度/tz，含开机默认时区 CST-8） */
+    config_store_init();
+
     /* 安装应用（安装顺序即左右滑动的切换顺序），默认启动点阵时钟 */
     if (!apps_install(&app_clock)) {
         ESP_LOGE(TAG, "apps_install(app_clock) failed (table full or duplicate)");
@@ -140,5 +168,5 @@ void app_main(void)
     apps_request_open(app_clock.name);
 
     xTaskCreate(gui_task, "gui_task", 4096 * 2, NULL, 5, NULL);
-    xTaskCreate(console_task, "console", 4096, NULL, 5, NULL);
+    xTaskCreate(console_task, "console", 6144, NULL, 5, NULL); /* 行/响应缓冲 ~1.1KB */
 }
