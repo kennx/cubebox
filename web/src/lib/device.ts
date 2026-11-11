@@ -259,7 +259,7 @@ const MOCK_DEFAULTS: MockState = {
   wifi_pass: "",
 };
 
-/** 与固件 config_model 相同的验证规则（Task 4 依赖其报错语义） */
+/** 与固件 config_model 相同的验证规则（ssid/pass 允许可打印 ASCII 与合法 UTF-8，字节计长） */
 function mockValidate(patch: ConfigPatch): void {
   if (patch.brightness !== undefined) {
     if (!Number.isInteger(patch.brightness) || patch.brightness < 0 || patch.brightness > 100)
@@ -268,13 +268,14 @@ function mockValidate(patch: ConfigPatch): void {
   if (patch.tz !== undefined) {
     if (!/^[A-Za-z0-9+\-,./:<>]{1,39}$/.test(patch.tz)) throw new Error("bad field: tz");
   }
-  const printable = (s: string) => /^[\x20-\x7e]*$/.test(s);
+  const byteLen = (s: string) => new TextEncoder().encode(s).length;
+  const noControl = (s: string) => !/[\x00-\x1f\x7f]/.test(s);
   if (patch.wifi_ssid !== undefined) {
-    if (patch.wifi_ssid.length < 1 || patch.wifi_ssid.length > 32 || !printable(patch.wifi_ssid))
-      throw new Error("bad field: wifi_ssid");
+    const n = byteLen(patch.wifi_ssid);
+    if (n < 1 || n > 32 || !noControl(patch.wifi_ssid)) throw new Error("bad field: wifi_ssid");
   }
   if (patch.wifi_pass !== undefined) {
-    if (patch.wifi_pass.length > 64 || !printable(patch.wifi_pass))
+    if (byteLen(patch.wifi_pass) > 64 || !noControl(patch.wifi_pass))
       throw new Error("bad field: wifi_pass");
   }
 }

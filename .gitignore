@@ -18,6 +18,7 @@
 
 # Node (web/)
 node_modules/
+*.tsbuildinfo
 
 # Build artifacts and directories
 **/build/

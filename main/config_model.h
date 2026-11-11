@@ -19,18 +19,29 @@ typedef struct {
 /* 填默认值：brightness=100、tz="CST-8"、Wi-Fi 空 */
 void config_model_defaults(config_model_t *cfg);
 
+/* key 的期望值类型（SETCFG 类型分派用） */
+typedef enum {
+    CFG_TYPE_NUMBER,
+    CFG_TYPE_STRING,
+} config_model_type_t;
+
+/** 已知 key 返回其期望类型；未知 key 返回 false */
+bool config_model_key_type(const char *key, config_model_type_t *out);
+
 /*
  * 按 key 赋数值字段（当前仅 "brightness"，整数 0-100）。
- * 未知 key 返回 true（忽略）；验证失败返回 false 且不改动 cfg。
+ * 已知字符串 key 传数值 → false（类型不匹配）；未知 key 返回 true（忽略）；
+ * 验证失败返回 false 且不改动 cfg。
  */
 bool config_model_set_number(config_model_t *cfg, const char *key, double value);
 
 /*
  * 按 key 赋字符串字段并验证全部约束：
- *   tz        1-39 字符，白名单 A-Za-z0-9 + - , . : / < >（. 为 DST 规则必需）
- *   wifi_ssid 1-32 可打印字符（0x20-0x7E）
- *   wifi_pass 0-64 可打印字符（空串 = 清除已存密码）
- * 未知 key 返回 true（忽略）；验证失败返回 false 且不改动 cfg。
+ *   tz        1-39 字节，白名单 A-Za-z0-9 + - , . : / < >（. 为 DST 规则必需）
+ *   wifi_ssid 1-32 字节，可打印 ASCII（0x20-0x7E）或合法 UTF-8 序列
+ *   wifi_pass 0-64 字节，同上（空串 = 清除已存密码；字节计长与 esp_wifi 缓冲一致）
+ * 已知数值 key 传字符串 → false（类型不匹配）；未知 key 返回 true（忽略）；
+ * 验证失败返回 false 且不改动 cfg。
  */
 bool config_model_set_string(config_model_t *cfg, const char *key, const char *value);
 

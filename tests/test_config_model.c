@@ -76,10 +76,9 @@ int main(void)
                                    "01234567890123456789012345678901") == true, "ssid 32 chars accepted");
     expect(config_model_set_string(&cfg, "wifi_ssid",
                                    "012345678901234567890123456789012") == false, "ssid 33 chars rejected");
-    /* 引号/反斜杠是可打印 ASCII（0x20-0x7E），按规格应接受并由 to_json 转义；
-     * 多字节 UTF-8（字节 >= 0x80）才超出可打印范围被拒（Ruling 见 ledger） */
+    /* 引号/反斜杠是可打印 ASCII（0x20-0x7E），应接受并由 to_json 转义；
+     * UTF-8 多字节放宽接受见下方「合法 UTF-8」块（终审 Ruling） */
     expect(config_model_set_string(&cfg, "wifi_ssid", "a\"b\\c") == true, "ssid quote/backslash accepted (printable)");
-    expect(config_model_set_string(&cfg, "wifi_ssid", "\xe5\xae\xb6") == false, "ssid UTF-8 rejected (printable only)");
     expect(config_model_set_string(&cfg, "wifi_ssid", "") == false, "ssid empty rejected");
     expect_str(cfg.wifi_ssid, "a\"b\\c", "ssid unchanged after rejects");
 
@@ -97,8 +96,31 @@ int main(void)
         expect(config_model_set_string(&cfg, "wifi_pass", "secret!@#") == true, "pass punctuation accepted");
     }
 
+    /* ---- wifi_ssid/pass 放宽为合法 UTF-8（字节计长，中文 SSID 是高频场景） ---- */
+    expect(config_model_set_string(&cfg, "wifi_ssid", "\xe5\xae\xb6\xe5\xba\xad") == true, "ssid UTF-8 accepted (6 bytes)");
+    expect(config_model_set_string(&cfg, "wifi_pass", "\xe5\xaf\x86\xe7\xa0\x81") == true, "pass UTF-8 accepted");
+    expect(config_model_set_string(&cfg, "wifi_ssid", "\x80") == false, "ssid lone continuation byte rejected");
+    expect(config_model_set_string(&cfg, "wifi_ssid", "\xe5\xae") == false, "ssid truncated UTF-8 rejected");
+    expect(config_model_set_string(&cfg, "wifi_ssid", "\xc0\x80") == false, "ssid overlong encoding rejected");
+    {
+        /* 字节上限：10 个中文 30 字节过，11 个 33 字节拒 */
+        char u[64];
+        memset(u, 0, sizeof(u));
+        for (int i = 0; i < 10; i++) strcat(u, "\xe4\xb8\xad");
+        expect(config_model_set_string(&cfg, "wifi_ssid", u) == true, "ssid 30 UTF-8 bytes accepted");
+        strcat(u, "\xe4\xb8\xad");
+        expect(config_model_set_string(&cfg, "wifi_ssid", u) == false, "ssid 33 UTF-8 bytes rejected");
+    }
+
     /* ---- set_string: 未知 key 忽略 ---- */
     expect(config_model_set_string(&cfg, "nope", "x") == true, "unknown string key ignored");
+
+    /* ---- 已知 key 类型不匹配 → false（SETCFG {"brightness":"40"} 不得静默成功） ---- */
+    expect(config_model_set_number(&cfg, "tz", 8) == false, "set_number on string key rejected");
+    expect(config_model_set_number(&cfg, "wifi_ssid", 1) == false, "set_number on ssid rejected");
+    expect(config_model_set_number(&cfg, "wifi_pass", 1) == false, "set_number on pass rejected");
+    expect(config_model_set_string(&cfg, "brightness", "40") == false, "set_string on number key rejected");
+    expect(cfg.brightness == 100 && cfg.brightness != 40, "brightness unchanged by type mismatch");
 
     /* ---- 验证失败不改动：tz 拒后仍为上次合法值 ---- */
     config_model_set_string(&cfg, "tz", "JST-9");
@@ -128,6 +150,12 @@ int main(void)
     strcpy(cfg.wifi_ssid, "x\x01y");
     config_model_to_json(&cfg, json, sizeof(json));
     expect_json_contains(json, "x\\u0001y", "escape control char as \\u00XX");
+
+    /* UTF-8 原样直出（合法路径：setter 接受中文 ssid，to_json 不转义多字节） */
+    config_model_defaults(&cfg);
+    expect(config_model_set_string(&cfg, "wifi_ssid", "\xe5\xae\xb6") == true, "ssid 中文 accepted for json");
+    config_model_to_json(&cfg, json, sizeof(json));
+    expect_json_contains(json, "\"wifi_ssid\":\"\xe5\xae\xb6\"", "UTF-8 passthrough in json");
 
     /* 截断安全：小 buf 不越界（配合 asan），结果以 NUL 结尾 */
     char small[8];

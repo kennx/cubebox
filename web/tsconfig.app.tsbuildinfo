@@ -1,1 +1,0 @@
-{"root":["./src/App.tsx","./src/main.tsx","./src/vite-env.d.ts","./src/components/BrightnessCard.tsx","./src/components/ConfigScreen.tsx","./src/components/ConnectScreen.tsx","./src/components/PlaceholderCard.tsx","./src/components/TimezoneCard.tsx","./src/components/WifiCard.tsx","./src/lib/device.ts","./src/lib/webserial.d.ts"],"version":"5.9.3"}

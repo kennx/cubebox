@@ -80,13 +80,17 @@ bool config_store_set_json(const char *json, char *err, size_t err_len)
     bool ok = true;
     for (const cJSON *item = root->child; item != NULL; item = item->next) {
         const char *key = item->string ? item->string : "";
-        if (cJSON_IsNumber(item)) {
-            ok = config_model_set_number(&tmp, key, item->valuedouble);
-        } else if (cJSON_IsString(item)) {
-            ok = config_model_set_string(&tmp, key, item->valuestring);
+        config_model_type_t want;
+        if (!config_model_key_type(key, &want)) {
+            continue; /* 未知 key 忽略（向前兼容：新版网页发旧固件不认识的字段） */
         }
-        /* 其他类型（bool/null/嵌套对象）按未知字段忽略 */
+        if (want == CFG_TYPE_NUMBER) {
+            ok = cJSON_IsNumber(item) && config_model_set_number(&tmp, key, item->valuedouble);
+        } else {
+            ok = cJSON_IsString(item) && config_model_set_string(&tmp, key, item->valuestring);
+        }
         if (!ok) {
+            /* 验证失败，或已知 key 的 JSON 类型不匹配（bool/null/嵌套对象在此拒绝） */
             snprintf(err, err_len, "bad field: %s", key);
             break;
         }

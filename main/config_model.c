@@ -29,17 +29,60 @@ static bool tz_valid(const char *s)
     return true;
 }
 
+/* 合法 UTF-8 多字节序列：返回序列字节数，非法返回 0（拒绝孤立续字节/截断/超长/代理对） */
+static size_t utf8_seq_len(const unsigned char *s, size_t remain)
+{
+    const bool cont = remain >= 2 && (s[1] & 0xC0) == 0x80;
+    const bool cont2 = remain >= 3 && (s[2] & 0xC0) == 0x80;
+    const bool cont3 = remain >= 4 && (s[3] & 0xC0) == 0x80;
+    unsigned char b = s[0];
+
+    if (b >= 0xC2 && b <= 0xDF) {
+        return cont ? 2 : 0;
+    }
+    if (b == 0xE0) {
+        return (cont && s[1] >= 0xA0 && s[1] <= 0xBF && cont2) ? 3 : 0;
+    }
+    if ((b >= 0xE1 && b <= 0xEC) || b == 0xEE || b == 0xEF) {
+        return (cont && cont2) ? 3 : 0;
+    }
+    if (b == 0xED) { /* 代理区 U+D800–DFFF 之外 */
+        return (cont && s[1] >= 0x80 && s[1] <= 0x9F && cont2) ? 3 : 0;
+    }
+    if (b == 0xF0) {
+        return (cont && s[1] >= 0x90 && s[1] <= 0xBF && cont2 && cont3) ? 4 : 0;
+    }
+    if (b >= 0xF1 && b <= 0xF3) {
+        return (cont && cont2 && cont3) ? 4 : 0;
+    }
+    if (b == 0xF4) { /* 上限 U+10FFFF */
+        return (cont && s[1] >= 0x80 && s[1] <= 0x8F && cont2 && cont3) ? 4 : 0;
+    }
+    return 0;
+}
+
 static bool printable_valid(const char *s, size_t min_len, size_t max_len)
 {
     size_t n = strlen(s);
     if (n < min_len || n > max_len) {
         return false;
     }
-    for (size_t i = 0; i < n; i++) {
+    /* 可打印 ASCII 直过；多字节序列须为合法 UTF-8（中文 SSID 高频场景，字节计长） */
+    size_t i = 0;
+    while (i < n) {
         unsigned char c = (unsigned char)s[i];
-        if (c < 0x20 || c > 0x7E) {
+        if (c >= 0x20 && c <= 0x7E) {
+            i++;
+            continue;
+        }
+        if (c < 0x80) {
+            return false; /* 控制字符 / DEL */
+        }
+        size_t len = utf8_seq_len((const unsigned char *)s + i, n - i);
+        if (len == 0) {
             return false;
         }
+        i += len;
     }
     return true;
 }
@@ -50,6 +93,24 @@ void config_model_defaults(config_model_t *cfg)
     strcpy(cfg->tz, "CST-8");
     cfg->wifi_ssid[0] = '\0';
     cfg->wifi_pass[0] = '\0';
+}
+
+static bool is_string_key(const char *key)
+{
+    return strcmp(key, "tz") == 0 || strcmp(key, "wifi_ssid") == 0 || strcmp(key, "wifi_pass") == 0;
+}
+
+bool config_model_key_type(const char *key, config_model_type_t *out)
+{
+    if (strcmp(key, "brightness") == 0) {
+        *out = CFG_TYPE_NUMBER;
+        return true;
+    }
+    if (is_string_key(key)) {
+        *out = CFG_TYPE_STRING;
+        return true;
+    }
+    return false;
 }
 
 bool config_model_set_number(config_model_t *cfg, const char *key, double value)
@@ -63,6 +124,10 @@ bool config_model_set_number(config_model_t *cfg, const char *key, double value)
             return false;
         }
         cfg->brightness = (uint8_t)v;
+        return true;
+    }
+    if (is_string_key(key)) {
+        return false; /* 已知 key 但类型不匹配（SETCFG {"tz":9} 整体拒绝） */
     }
     return true; /* 未知 key 忽略 */
 }
@@ -92,6 +157,9 @@ bool config_model_set_string(config_model_t *cfg, const char *key, const char *v
         }
         snprintf(cfg->wifi_pass, sizeof(cfg->wifi_pass), "%s", value);
         return true;
+    }
+    if (strcmp(key, "brightness") == 0) {
+        return false; /* 已知 key 但类型不匹配（SETCFG {"brightness":"40"} 整体拒绝） */
     }
     return true; /* 未知 key 忽略 */
 }
