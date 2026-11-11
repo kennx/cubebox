@@ -1,14 +1,16 @@
 /*
  * 点阵 LVGL v8 自定义 widget：继承 lv_obj_class，DRAW_MAIN 中遍历 529 点、
  * 只画与裁剪区相交的圆（lv_draw_rect radius）。几何对照 example.svg：
- * 边距 4px、半径 8px、圆心 c(i) = 12 + (i*456 + 11)/22（与 SVG 常量差 < 1px/点）。
+ * 圆心 c(i) = 30 + (i*420 + 11)/22。origin 30/半径 7 使全部 529 点避开屏幕
+ * 四角圆角遮罩（实测半径 69.3-73.6px，见 docs/apps/app_radius.md：角点
+ * (30,30) 距最坏角 73.6px 的圆心 √2·43.6 + 7 = 68.7px，余量 4.9px）。
  */
 #include "apps/common/dotmatrix/view_dotmatrix.h"
 
-/* 几何常量（px） */
-#define DOTMATRIX_DOT_R     8     /* 圆半径 */
-#define DOTMATRIX_ORIGIN    12    /* 首圆心坐标（= 边距 4 + 半径 8） */
-#define DOTMATRIX_PITCH_NUM 456   /* 480 − 2×12 */
+/* 几何常量（px）：圆角适配（origin↑ pitch↓ dot_r↓，间隙 5.1px ≈ 原 4.7px） */
+#define DOTMATRIX_DOT_R     7     /* 圆半径 */
+#define DOTMATRIX_ORIGIN    30    /* 首圆心坐标（= 边距 23 + 半径 7） */
+#define DOTMATRIX_PITCH_NUM 420   /* 480 − 2×30 */
 #define DOTMATRIX_PITCH_DEN 22    /* 23 点 − 1 */
 
 typedef struct {
