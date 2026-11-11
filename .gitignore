@@ -82,3 +82,6 @@ Desktop.ini
 *.sln.docstates # Visual Studio
 .vscode/
 .devcontainer/
+
+# ZCode agent 会话产物（计划/任务状态，工具本地文件）
+.zcode/
