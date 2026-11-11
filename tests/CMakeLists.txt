@@ -28,3 +28,14 @@ target_compile_options(test_dotmatrix PRIVATE -Wall -Werror -fsanitize=address,u
 target_link_options(test_dotmatrix PRIVATE -fsanitize=address,undefined)
 
 add_test(NAME test_dotmatrix COMMAND test_dotmatrix)
+
+add_executable(test_config_model
+    test_config_model.c
+    ../main/config_model.c
+)
+
+target_include_directories(test_config_model PRIVATE ../main)
+target_compile_options(test_config_model PRIVATE -Wall -Werror -fsanitize=address,undefined)
+target_link_options(test_config_model PRIVATE -fsanitize=address,undefined)
+
+add_test(NAME test_config_model COMMAND test_config_model)
