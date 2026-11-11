@@ -16,6 +16,9 @@
 # Log files
 *.log
 
+# Node (web/)
+node_modules/
+
 # Build artifacts and directories
 **/build/
 build/
