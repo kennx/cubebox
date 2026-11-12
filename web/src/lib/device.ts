@@ -91,6 +91,7 @@ class SerialDevice implements Device {
   private heartbeatMisses = 0;
   private disconnectCbs: Array<() => void> = [];
   private disconnectedFired = false;
+  private teardownPromise: Promise<void> | null = null;
 
   onDisconnect(cb: () => void): void {
     this.disconnectCbs.push(cb);
@@ -100,6 +101,8 @@ class SerialDevice implements Device {
     if (!("serial" in navigator)) {
       throw new Error("当前浏览器不支持 Web Serial，请使用 Chrome 或 Edge");
     }
+    this.disconnectedFired = false; // 复位断开状态与 teardown 单例，支持实例复用重连
+    this.teardownPromise = null;
     try {
       this.port = await navigator.serial.requestPort({
         filters: [{ usbVendorId: VID_ESPRESSIF }],
@@ -125,13 +128,15 @@ class SerialDevice implements Device {
         lastErr = e;
       }
     }
+    /* 握手失败：从未成功连接，置位以不发 onDisconnect 回调，
+       也不让 pump 退出时再触发一次（teardown 本身已由单例保证只跑一次） */
+    this.disconnectedFired = true;
     await this.teardown();
     throw new Error(`配对失败：设备无响应（${String(lastErr)}）`);
   }
 
   async disconnect(): Promise<void> {
-    /* 置位标志：pump 退出时不再触发 onDisconnect 回调（主动断开由调用方自行复位 UI），
-       也避免与 teardown 并发的第二次 teardown */
+    /* 置位标志：pump 退出时不再触发 onDisconnect 回调（主动断开由调用方自行复位 UI） */
     this.disconnectedFired = true;
     await this.teardown();
   }
@@ -196,11 +201,12 @@ class SerialDevice implements Device {
   }
 
   private startReader(): void {
-    this.reader = this.port!.readable!.getReader();
+    const reader = this.port!.readable!.getReader();
+    this.reader = reader;
     const pump = async () => {
       try {
         for (;;) {
-          const { done, value } = await this.reader!.read();
+          const { done, value } = await reader.read();
           if (done) break;
           this.lineBuf += this.decoder.decode(value, { stream: true });
           let nl: number;
@@ -255,7 +261,15 @@ class SerialDevice implements Device {
     for (const cb of this.disconnectCbs) cb();
   }
 
-  private async teardown(): Promise<void> {
+  /** 幂等单例：connect 失败 / 主动断开 / 拔线多路汇入时 teardown 仅执行一次——
+      并发的第二次 teardown 会在 reader 锁尚未释放时 port.close()（被拒且吞掉），
+      且抢先置空 this.port 使第一次的 close 永远丢失，串口保持打开 */
+  private teardown(): Promise<void> {
+    this.teardownPromise ??= this.doTeardown();
+    return this.teardownPromise;
+  }
+
+  private async doTeardown(): Promise<void> {
     if (this.heartbeatTimer != null) clearInterval(this.heartbeatTimer);
     this.heartbeatTimer = null;
     if (this.waiter) {

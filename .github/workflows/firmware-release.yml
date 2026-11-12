@@ -54,7 +54,7 @@ jobs:
         run: |
           SHA=$(git rev-parse --short HEAD)
           VER=$(grep -oP 'PROJECT_VER \K[0-9.]+' CMakeLists.txt)
-          PREV=$(git tag -l 'fw-*' --sort=-creatordate | head -1)
+          PREV=$(git tag -l 'fw-*' --sort=-creatordate | grep -v "^fw-$SHA\$" | head -1) # 排除自身：同 SHA 重跑时避免空 notes 覆盖
           if [ -n "$PREV" ]; then
             LOG=$(git log --oneline --no-decorate "$PREV..HEAD")
           else
@@ -81,7 +81,7 @@ jobs:
           } >> "$GITHUB_OUTPUT"
 
       - name: 发布 Release
-        uses: ncipollo/release-action@v1
+        uses: ncipollo/release-action@339a81892b84b4eeb0f6e744e4574d79d0d9b8dd # v1，第三方 action 按 SHA 固定（供应链）
         with:
           tag: ${{ steps.meta.outputs.tag }}
           name: ${{ steps.meta.outputs.name }}
