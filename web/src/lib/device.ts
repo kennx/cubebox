@@ -1,6 +1,6 @@
 /*
  * 设备通信层：Web Serial 真机实现 + localStorage mock 实现（同一 Device 接口）。
- * 协议（proto 2）：UTF-8 行文本，命令行 PING/GETCFG/SETCFG <json>/SCAN/TIME；
+ * 协议（proto 3）：UTF-8 行文本，命令行 PING/GETCFG/SETCFG <json>/SCAN/TIME/WAKE；
  * 响应行 # 前缀（#HELLO/#CFG/#ERR/#NETWORKS/#TIME），其余行（ESP_LOG）为噪声直接丢弃。
  * 规格见 docs/features/web-config.md。
  */
@@ -336,7 +336,7 @@ class MockDevice implements Device {
   async connect(): Promise<DeviceInfo> {
     await sleep(MOCK_DELAY_MS);
     this.connected = true;
-    return { name: "CubeBox", fw: "0.3.0-mock", proto: 2 };
+    return { name: "CubeBox", fw: "0.3.0-mock", proto: 3 };
   }
 
   async disconnect(): Promise<void> {

@@ -3,6 +3,8 @@ import { useEffect, useState } from "react";
 interface Props {
   idleTimeout: number; // 秒 {0,30,60,300,600}，0=永不
   onChange: (value: number) => Promise<void>;
+  /** 固件是否支持（proto>=3）。旧固件 SETCFG 对未知 key 静默忽略，门控防「保存成功」假象 */
+  supported: boolean;
 }
 
 const OPTIONS: Array<{ v: number; label: string }> = [
@@ -13,8 +15,8 @@ const OPTIONS: Array<{ v: number; label: string }> = [
   { v: 0, label: "永不" },
 ];
 
-/** 自动低功耗：无操作超时后降亮度回时钟，触摸或 KEY 唤醒；选择即提交 */
-export default function IdleTimeoutCard({ idleTimeout, onChange }: Props) {
+/** 自动低功耗：无操作超时后降亮度回时钟，触摸或 KEY 唤醒；选择即提交（需固件 proto>=3） */
+export default function IdleTimeoutCard({ idleTimeout, onChange, supported }: Props) {
   const [value, setValue] = useState(idleTimeout);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState("");
@@ -41,11 +43,15 @@ export default function IdleTimeoutCard({ idleTimeout, onChange }: Props) {
         <h2>自动低功耗</h2>
         {pending && <span className="badge">同步中…</span>}
       </div>
-      <p className="desc">无操作一段时间后自动降低亮度并回到时钟，触摸屏幕或按 KEY 键唤醒</p>
+      <p className="desc">
+        {supported
+          ? "无操作一段时间后自动降低亮度并回到时钟，触摸屏幕或按 KEY 键唤醒"
+          : "当前固件不支持此功能：需固件协议 proto 3 及以上（升级固件后可用）"}
+      </p>
       <div className="card-actions">
         <select
           value={OPTIONS.some((o) => o.v === value) ? String(value) : ""}
-          disabled={pending}
+          disabled={pending || !supported}
           onChange={(e) => {
             const next = Number(e.target.value);
             setValue(next);

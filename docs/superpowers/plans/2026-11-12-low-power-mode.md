@@ -62,7 +62,7 @@
   - `low_power_action_t low_power_step(low_power_ctx_t *ctx, uint32_t idle_ms, bool key_pressed, uint32_t timeout_s);`
   - 语义：触摸活动 = `idle_ms < ctx->prev_idle_ms`；KEY 下降沿 = `key_pressed && !prev_key`；AWAKE 且 `timeout_s!=0 && idle_ms >= timeout_s*1000` → ENTER；DIMMED 且（活动或 KEY 沿）→ EXIT；DIMMED 且 `timeout_s==0` → EXIT；EXIT 仅在转变那一轮返回一次。
 
-- [ ] **Step 1: 写失败测试** —— 用例：初态不动作；idle 29999ms 不进 / 30000ms 进（timeout 30）；ENTER 后持续 idle 增长保持 NONE；dimmed 时 idle 回落 → EXIT；dimmed 时 KEY 下降沿 → EXIT；KEY 持续按住（沿已过）不再 EXIT；清醒期 KEY 沿 + idle 未回落 → 不 ENTER（防误解语义）；timeout=0 永不进；dimmed 时 timeout 变 0 → EXIT；EXIT 后下一轮 NONE（只触发一次）。
+- [ ] **Step 1: 写失败测试** —— 用例：初态不动作；idle 29999ms 不进 / 30000ms 进（timeout 30）；ENTER 后持续 idle 增长保持 NONE；dimmed 时 idle 回落 → EXIT；dimmed 时 KEY 下降沿 → EXIT；KEY 持续按住（沿已过）不再 EXIT；清醒期 KEY 沿不单独推迟超时（推迟由胶水层 trig_activity 注入 idle 回落；纯层 idle 到点即 ENTER，见 test_low_power.c 注释）；timeout=0 永不进；dimmed 时 timeout 变 0 → EXIT；EXIT 后下一轮 NONE（只触发一次）。
 - [ ] **Step 2: 跑测试确认失败**（编译错误：无头文件）
 - [ ] **Step 3: 实现**（纯 C，无 IDF/LVGL 依赖）
 - [ ] **Step 4: 跑测试确认通过**

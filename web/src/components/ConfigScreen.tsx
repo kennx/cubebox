@@ -91,7 +91,11 @@ export default function ConfigScreen({ device, info, onDisconnect }: Props) {
               </div>
               <WifiCard device={device} cfg={cfg} onSave={saveWifi} />
               <BrightnessCard brightness={cfg.brightness} onChange={saveBrightness} />
-              <IdleTimeoutCard idleTimeout={cfg.idle_timeout ?? 30} onChange={saveIdleTimeout} />
+              <IdleTimeoutCard
+                idleTimeout={cfg.idle_timeout ?? 30}
+                onChange={saveIdleTimeout}
+                supported={info.proto >= 3}
+              />
               <TimezoneCard tz={cfg.tz} onSave={saveTz} />
             </>
           ) : (
