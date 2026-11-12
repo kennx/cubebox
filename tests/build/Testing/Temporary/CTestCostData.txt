@@ -1,5 +1,0 @@
-test_apps 5 0.00210231
-test_dotmatrix 5 0.00232197
-test_config_model 5 0.00227641
-test_low_power 3 0.00336475
----

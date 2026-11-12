@@ -1,1 +1,0 @@
-/usr/bin/cc -g -fsanitize=address,undefined -Wl,--dependency-file=CMakeFiles/test_dotmatrix.dir/link.d CMakeFiles/test_dotmatrix.dir/test_dotmatrix.c.o CMakeFiles/test_dotmatrix.dir/home/kenn/projects/cubebox/main/apps/common/dotmatrix/dotmatrix.c.o -o test_dotmatrix

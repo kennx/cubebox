@@ -1,1 +1,0 @@
-/usr/bin/cc -g -fsanitize=address,undefined -Wl,--dependency-file=CMakeFiles/test_config_model.dir/link.d CMakeFiles/test_config_model.dir/test_config_model.c.o CMakeFiles/test_config_model.dir/home/kenn/projects/cubebox/main/config_model.c.o -o test_config_model
