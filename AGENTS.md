@@ -22,11 +22,13 @@ main/
 ├── config_model.*    # 配置模型：字段验证 + JSON 拼装（纯逻辑，主机可测）
 ├── config_store.*    # 配置存储与应用：NVS 持久化 + SETCFG 解析 + 副作用 defer 到 gui_task
 ├── time_sync.*       # 时间同步协调：RTC 开机恢复系统时间 + SNTP 配置 + 同步后写回 RTC
+├── low_power.*       # 低功耗状态机（纯逻辑，主机可测）：无操作超时降亮度回时钟，触摸/KEY/WAKE 唤醒；动作由 gui_task 胶水执行
 ├── hal/              # 硬件抽象层（HAL）
 │   ├── hal.h         # 聚合入口，上层统一从这里引入
 │   ├── hal_power.*   # AXP2101 电源管理（ALDO3 屏复位）
 │   ├── hal_rtc.*     # PCF85063 RTC（电池走时，存 UTC）
 │   ├── hal_wifi.*    # Wi-Fi STA 连接（幂等凭据应用）+ 附近 AP 扫描
+│   ├── hal_button.*  # KEY 用户按键（GPIO10 内部上拉、低有效，轮询接口）
 │   └── hal_display.* # SH8601 QSPI 面板 + LVGL 驱动 + 截图流式输出 + 背光
 └── apps/             # 应用层
     ├── apps.{c,h}    # 应用框架：注册表 + 生命周期状态机（主机可测纯 C）
@@ -42,7 +44,7 @@ docs/apps/            # 每个应用一份说明文档（强制，见"分层架�
 docs/features/        # 功能规格文档（如 web-config.md：USB 配置协议规格）
 ```
 
-- `main/main.c`：app_main 初始化顺序（TF CS 释放、I2C 总线、HAL、hal_rtc/hal_wifi/time_sync、config_store_init、安装应用并请求启动默认应用 clock）、gui_task 主循环（截图请求 → `config_store_apply_pending()` → `apps_update()` → `lv_timer_handler`）、USB 调试 console 任务（SNAP/NEXT/REBOOT/PING/GETCFG/SETCFG/SCAN/TIME 命令）。应用安装顺序即左右滑动的切换顺序（clock → test，循环）。
+- `main/main.c`：app_main 初始化顺序（TF CS 释放、I2C 总线、HAL、hal_rtc/hal_wifi/time_sync、config_store_init、安装应用并请求启动默认应用 clock）、gui_task 主循环（截图请求 → `config_store_apply_pending()` → `low_power_service()` → `apps_update()` → `lv_timer_handler`）、USB 调试 console 任务（SNAP/NEXT/REBOOT/WAKE/PING/GETCFG/SETCFG/SCAN/TIME 命令）。应用安装顺序即左右滑动的切换顺序（clock → test，循环）。
 - `main/CMakeLists.txt`：主组件构建配置。`hal/` 与 `apps/` 源码按 GLOB_RECURSE 递归收集——**新增/删除源文件后必须 `idf.py reconfigure`**（GLOB 仅在 configure 时求值，直接 build 不会感知新文件）；落在 main/ 根的源文件（如 config_*.c）不被 GLOB 覆盖，须显式加入 SRCS。
 - `main/idf_component.yml`：IDF 组件管理器清单。当前依赖 `espressif/esp_lcd_sh8601`、`lvgl/lvgl`、`waveshare/esp_lcd_touch_cst9217` 与 `waveshare/pcf85063a`。
 - `docs/hardwares/`：硬件规格与参考文档。
@@ -139,7 +141,7 @@ idf.py set-target esp32c6
   - 屏幕背光通过发送命令 `0x51` 调节亮度，无独立 GPIO 控制。
   - 显示屏复位由 AXP2101 ALDO3 控制电源复位，无独立 RST GPIO。
 - **QSPI / SPI 冲突**：LCD（QSPI，4-bit）与 TF 卡（SDSPI，1-bit）共享 CLK/MOSI/MISO GPIO，两者不能同时以最高性能传输，需由软件控制 CS 切换总线访问。典型做法：初始化时上拉 TF CS（GPIO 6）释放总线给 LCD。
-- **Strapping Pins**：GPIO 0~4 已用于 LCD QSPI（CS=GPIO 15），GPIO 5 为触摸中断 TP_INT，GPIO 8~9 已用于 I2C / BOOT 按键。外接设备时注意不要在复位时改变这些引脚电平。
+- **Strapping Pins**：GPIO 0~4 已用于 LCD QSPI（CS=GPIO 15），GPIO 5 为触摸中断 TP_INT，GPIO 8~9 已用于 I2C / BOOT 按键，GPIO 10 为 KEY 用户按键（低功耗唤醒，见 `hal_button`）。外接设备时注意不要在复位时改变这些引脚电平。
 - **LVGL 使用规范**：
   - 当前使用 LVGL v8.x。遵循其对象模型，优先使用 `lv_obj_set_style_xxx` 做样式控制。
   - 避免每帧全屏 `lv_obj_invalidate(lv_scr_act())`，改为仅标记变化区域。
@@ -165,6 +167,7 @@ idf.py set-target esp32c6
 - **远程调试（USB 控制台命令，`main.c` 的 console 任务经 usb_serial_jtag 驱动直读；主 console 即 USB-Serial/JTAG——sdkconfig.defaults 配置，ESP_LOG 与 SNAP 截图流共用同一通道，screenshot.py 已过滤日志行）**：
   - `SNAP` + `tools/screenshot.py -p PORT -o shot.png`：抓取屏幕 PNG（用系统 python 跑，IDF venv 缺 Pillow）。
   - `NEXT`：循环切换到下一个已安装应用（触摸失效时的兜底验证途径）。
+  - `WAKE`：注入一次唤醒活动，退出低功耗态（无法远程触摸/按 KEY 时的验证途径）。
   - `REBOOT`：远程重启（抓完整启动日志用）。
   - `SCAN`：阻塞扫描附近未隐藏 AP（~2-4s），回 `#NETWORKS [{ssid,rssi,secure}]`（网页 Wi-Fi 卡片用）。
   - `TIME`：回 `#TIME {synced,utc,local}`（设备时间与 NTP 同步状态，网页时钟页用）。

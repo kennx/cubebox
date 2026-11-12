@@ -32,7 +32,7 @@
 
 | 模块 | 职责 |
 |------|------|
-| `hal/hal_button.{c,h}`（新） | GPIO10 输入+内部上拉；`hal_button_pressed_since(prev)` 位图消抖轮询。聚合进 `hal.h` |
+| `hal/hal_button.{c,h}`（新） | GPIO10 输入+内部上拉；`hal_button_pressed()` 轮询（低有效，沿检测/消抖语义由 low_power 持有）。聚合进 `hal.h` |
 | `main/low_power.{c,h}`（新） | 纯逻辑状态机（主机可测）：AWAKE→超时→DIMMED→触摸/KEY→AWAKE；动作枚举由薄包装执行：`apps_request_open("clock")` + `hal_display_set_backlight()` |
 | `config_model` | 新字段 `idle_timeout`（u16 秒，白名单 {0,30,60,300,600}，0=永不，默认 30）；GETCFG/SETCFG JSON 同步 |
 | `config_store` | NVS key `idle_sec`（u16）；新增 `idle_timeout`/`brightness` 只读 getter 供 low_power 用 |

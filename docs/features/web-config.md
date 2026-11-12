@@ -8,13 +8,15 @@ React 单页应用（`web/`，部署于 [gh-pages](https://kennx.github.io/cubeb
 
 1. Chrome / Edge 打开配置页（Web Serial 仅 Chromium 系支持，且需 HTTPS——Pages 满足）。
 2. USB 连接设备，点「授权并连接」→ 浏览器弹出设备选择（过滤 Espressif VID `0x303A`）→ 授权。
-3. 配对成功进入「通用配置」：Wi-Fi 凭据（可扫描附近网络选择）/ 屏幕亮度 / 时区，保存即生效并持久化（断电保持）。
+3. 配对成功进入「通用配置」：Wi-Fi 凭据（可扫描附近网络选择）/ 屏幕亮度 / 自动低功耗 / 时区，保存即生效并持久化（断电保持）。
 4. 侧栏「时钟」页：NTP 服务器配置 + 设备当前时间与同步状态展示。
 
-## 协议规格（proto 2）
+## 协议规格（proto 3）
 
 proto 2 在 proto 1 基础上新增 `ntp_server` 配置字段与 `SCAN` / `TIME` 命令
 （Wi-Fi 连接、NTP 校时与 RTC 写入见 `docs/features/ntp-time-sync.md`）。
+proto 3 在 proto 2 基础上新增 `idle_timeout` 配置字段与 `WAKE` 命令
+（低功耗模式：无操作超时降亮度回时钟、触摸/KEY/WAKE 唤醒）。
 
 传输层：UTF-8 行文本，`\n` 结尾，115200 baud。与 ESP_LOG、SNAP 截图流共用同一串口通道——
 **协议响应行以 `#` 前缀标识**，其余行一律视为日志噪声丢弃。
@@ -28,12 +30,13 @@ proto 2 在 proto 1 基础上新增 `ntp_server` 配置字段与 `SCAN` / `TIME`
 | `SETCFG <json>` | 部分更新配置（只改出现的 key） |
 | `SCAN` | 扫描附近未隐藏 AP（设备阻塞 ~2–4s），回 `#NETWORKS` |
 | `TIME` | 查询设备时间与 NTP 同步状态，回 `#TIME` |
+| `WAKE` | 注入一次唤醒活动：设备若处于低功耗态则退出（远程验证途径，无响应行） |
 
 ### 设备 → 网页
 
 ```
-#HELLO    {"name":"CubeBox","fw":"0.3.0","proto":2}       ← PING 的响应
-#CFG      {"brightness":40,"tz":"CST-8","wifi_ssid":"Home","wifi_pass_set":true,"ntp_server":"ntp.aliyun.com"}
+#HELLO    {"name":"CubeBox","fw":"0.3.0","proto":3}       ← PING 的响应
+#CFG      {"brightness":40,"idle_timeout":30,"tz":"CST-8","wifi_ssid":"Home","wifi_pass_set":true,"ntp_server":"ntp.aliyun.com"}
 #NETWORKS [{"ssid":"Home_5G","rssi":-46,"secure":true}]   ← SCAN 的响应（按信号强度降序，≤16 条）
 #TIME     {"synced":true,"utc":1762848000,"local":"2026-11-11 12:00:00"}  ← TIME 的响应
 #ERR      <原因短语>                                      ← SETCFG 验证/解析/NVS 失败，或 SCAN 忙
@@ -51,6 +54,7 @@ proto 2 在 proto 1 基础上新增 `ntp_server` 配置字段与 `SCAN` / `TIME`
 | key | 类型 | 约束 |
 |-----|------|------|
 | `brightness` | 整数 | 0–100（线性映射背光寄存器 0–255） |
+| `idle_timeout` | 整数 | 白名单 `{0,30,60,300,600}`（秒）：无操作超时自动进入低功耗（降亮度至 min(20, 配置亮度) 并回时钟 app），触摸/KEY/`WAKE` 唤醒；0=永不，默认 30 |
 | `tz` | 字符串 | 1–39 字节，白名单 `A-Za-z0-9 + - , . : / < >`（POSIX TZ，含夏令时规则如 `M3.2.0/2`） |
 | `wifi_ssid` | 字符串 | 1–32 字节，可打印 ASCII（0x20–0x7E）或合法 UTF-8 序列（中文 SSID 支持；字节计长与 esp_wifi 缓冲一致） |
 | `wifi_pass` | 字符串 | 0–64 字节，同上；空串 = 清除已存密码 |
