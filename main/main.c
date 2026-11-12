@@ -14,6 +14,7 @@
 #include "hal/hal.h"
 #include "config_store.h"
 #include "time_sync.h"
+#include "low_power.h"
 #include "apps/apps.h"
 #include "apps/common/swipe_nav/swipe_nav.h"
 #include "apps/app_clock/app_clock.h"
@@ -21,6 +22,10 @@
 #include "apps/app_radius/app_radius.h"
 
 #define TAG "main"
+
+/* 低功耗 WAKE 请求：console_task 置位 / gui_task 清零（单字节 bool 读写天然原子，
+ * 对照 config_store s_apply_pending 先例） */
+static volatile bool s_wake_req = false;
 
 /* I2C */
 #define I2C_SDA_GPIO    8
@@ -35,9 +40,10 @@
  *   NEXT            — 循环切换到下一个已安装应用（触摸失效时的兜底验证途径）
  *   RAD <px>        — 设置 app_radius 可调单弧半径（1-240）并切到该页
  *   PAGE <n>        — app_radius 直接跳页 0 白屏/1 刻度/2 可调弧
+ *   WAKE            — 注入一次唤醒活动（退出低功耗态；无法远程按 KEY/触摸时的验证途径）
  *   REBOOT          — 远程重启（抓完整启动日志用）
  *   PING            — 配对握手：回 #HELLO {name,fw,proto}（网页配置器用）
- *   GETCFG          — 回 #CFG {brightness,tz,wifi_ssid,wifi_pass_set,ntp_server}
+ *   GETCFG          — 回 #CFG {brightness,idle_timeout,tz,wifi_ssid,wifi_pass_set,ntp_server}
  *   SETCFG {json}   — 部分更新配置：回 #CFG {新状态} 或 #ERR {原因}
  *   SCAN            — 阻塞扫描附近未隐藏 AP（~2-4s）：回 #NETWORKS [{ssid,rssi,secure}]
  *   TIME            — 回 #TIME {synced,utc,local}（网页时钟页显示用）
@@ -93,10 +99,12 @@ static void console_task(void *arg)
                 } else {
                     n = snprintf(resp, sizeof(resp), "#ERR page 0-2\n");
                 }
+            } else if (strcmp(line, "WAKE") == 0) {
+                s_wake_req = true; /* gui_task 消费：注入活动退出低功耗（NEXT 式兜底） */
             } else if (strcmp(line, "REBOOT") == 0) {
                 esp_restart();
             } else if (strcmp(line, "PING") == 0) {
-                n = snprintf(resp, sizeof(resp), "#HELLO {\"name\":\"CubeBox\",\"fw\":\"%s\",\"proto\":2}\n",
+                n = snprintf(resp, sizeof(resp), "#HELLO {\"name\":\"CubeBox\",\"fw\":\"%s\",\"proto\":3}\n",
                              esp_app_get_description()->version);
             } else if (strcmp(line, "GETCFG") == 0) {
                 n = snprintf(resp, sizeof(resp), "#CFG %s\n",
@@ -141,21 +149,66 @@ static void console_task(void *arg)
 }
 
 /*
+ * 低功耗服务（gui_task 上下文）：超时无操作 → 切回时钟 + 降亮度；
+ * 触摸/KEY/WAKE 唤醒 → 恢复配置亮度。状态机纯逻辑见 low_power.c。
+ */
+static low_power_ctx_t s_low_power;
+
+/* 低功耗亮度 = min(20, 配置亮度)——配置更低时不反向调亮 */
+static uint8_t low_power_dim_brightness(void)
+{
+    uint8_t bright = config_store_get_brightness();
+    return bright < 20 ? bright : 20;
+}
+
+static void low_power_service(bool config_applied)
+{
+    bool key = hal_button_pressed();
+    if (s_wake_req) {
+        s_wake_req = false;
+        lv_disp_trig_activity(NULL); /* 注入活动：状态机经 idle 回落自然退出 */
+    } else if (key && !s_low_power.prev_key) {
+        /* KEY 下降沿同样是用户活动：重置 LVGL 无操作计时（清醒期推迟超时；
+         * 低功耗期由状态机的 KEY 沿 + idle 回落双路径退出） */
+        lv_disp_trig_activity(NULL);
+    }
+
+    uint32_t idle_ms = lv_disp_get_inactive_time(NULL);
+    low_power_action_t act = low_power_step(&s_low_power, idle_ms, key,
+                                            config_store_get_idle_timeout());
+    if (act == LOW_POWER_ENTER) {
+        apps_request_open(app_clock.name); /* 任意 app 退回时钟（本轮 apps_update 消费） */
+        hal_display_set_backlight(low_power_dim_brightness());
+        ESP_LOGI(TAG, "low power: enter (backlight %u%%)", low_power_dim_brightness());
+    } else if (act == LOW_POWER_EXIT) {
+        hal_display_set_backlight(config_store_get_brightness());
+        ESP_LOGI(TAG, "low power: wake (backlight %u%%)", config_store_get_brightness());
+    } else if (config_applied && s_low_power.dimmed) {
+        /* 低功耗期网页改亮度：apply_pending 已把背光设为全亮，压回 dim */
+        hal_display_set_backlight(low_power_dim_brightness());
+    }
+}
+
+/*
  * gui_task：全固件唯一允许调用 LVGL 的上下文。每循环：
  *   1. 截图请求 → 强制全屏 invalidate（flush_cb 流出全部条带）
  *   2. config_store_apply_pending：消费配置副作用（亮度/tz/Wi-Fi/NTP，console 置位）
- *   3. apps_update：消费跨任务的应用切换请求 + 调当前应用 on_running
- *   4. lv_timer_handler 驱动 LVGL 刷新
+ *   3. low_power_service：推进低功耗状态机（切 app 请求与背光动作都在本上下文）
+ *   4. apps_update：消费跨任务的应用切换请求 + 调当前应用 on_running
+ *   5. lv_timer_handler 驱动 LVGL 刷新
  */
 static void gui_task(void *arg)
 {
     (void)arg;
+    low_power_reset(&s_low_power);
     while (1) {
         if (hal_display_snapshot_begin_if_requested()) {
             lv_obj_invalidate(lv_scr_act());
         }
 
-        config_store_apply_pending();
+        bool config_applied = config_store_apply_pending();
+
+        low_power_service(config_applied);
 
         apps_update();
 
@@ -192,11 +245,12 @@ void app_main(void)
     i2c_master_bus_handle_t i2c_bus = NULL;
     ESP_ERROR_CHECK(i2c_new_master_bus(&bus_cfg, &i2c_bus));
 
-    /* HAL：先电源后显示（显示复位依赖 ALDO3），再触摸/RTC（失败不致命） */
+    /* HAL：先电源后显示（显示复位依赖 ALDO3），再触摸/RTC/KEY（失败不致命） */
     hal_power_init(i2c_bus);
     hal_display_init();
     hal_touch_init(i2c_bus);
     hal_rtc_init(i2c_bus);
+    hal_button_init();
 
     /* 配置：NVS 读取 + 置 pending，gui_task 首轮应用（亮度/tz/Wi-Fi/NTP，含开机默认值）。
      * 必须先于 hal_wifi_init：esp_wifi 内部依赖 NVS（osi_nvs） */

@@ -8,3 +8,4 @@
 #include "hal/hal_touch.h"
 #include "hal/hal_rtc.h"
 #include "hal/hal_wifi.h"
+#include "hal/hal_button.h"
