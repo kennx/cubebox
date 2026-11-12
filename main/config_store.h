@@ -2,6 +2,7 @@
 
 #include <stdbool.h>
 #include <stddef.h>
+#include <stdint.h>
 
 /*
  * 配置存储与应用：NVS 持久化 + SETCFG 解析（cJSON）+ 副作用应用。
@@ -21,8 +22,15 @@ void config_store_init(void);
  *  置 apply pending。任一字段非法或 NVS 失败整体拒绝（内存态不动），err 填原因短语。 */
 bool config_store_set_json(const char *json, char *err, size_t err_len);
 
-/** 仅 gui_task 每轮调用：消费 pending，执行 setenv/tzset + 背光设置。 */
-void config_store_apply_pending(void);
+/** 仅 gui_task 每轮调用：消费 pending，执行 setenv/tzset + 背光设置。
+ *  返回本轮是否真的应用了配置（低功耗态据此把被覆盖的亮度压回 dim 值）。 */
+bool config_store_apply_pending(void);
 
 /** 当前配置序列化为 JSON 写入 buf，返回 buf 便于直接输出。 */
 const char *config_store_get_json(char *buf, size_t buf_len);
+
+/** 当前低功耗超时秒数（0=永不）；gui_task 状态机每轮读取，SETCFG 即时生效 */
+uint16_t config_store_get_idle_timeout(void);
+
+/** 当前配置亮度 0-100；低功耗唤醒时恢复用 */
+uint8_t config_store_get_brightness(void);

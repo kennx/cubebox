@@ -18,6 +18,7 @@
 /* NVS key 上限 15 字节；namespace 无此限制 */
 #define CFG_NVS_NS     "cubebox"
 #define CFG_KEY_BRIGHT "bright"
+#define CFG_KEY_IDLE   "idle_sec"
 #define CFG_KEY_TZ     "tz"
 #define CFG_KEY_SSID   "wifi_ssid"
 #define CFG_KEY_PASS   "wifi_pass"
@@ -49,6 +50,11 @@ void config_store_init(void)
     if (nvs_get_u8(h, CFG_KEY_BRIGHT, &bright) == ESP_OK) {
         /* 久置 NVS 可能存有越界值：经 model 验证拒绝则保持默认 */
         config_model_set_number(&s_cfg, "brightness", bright);
+    }
+
+    uint16_t idle_sec = 0;
+    if (nvs_get_u16(h, CFG_KEY_IDLE, &idle_sec) == ESP_OK) {
+        config_model_set_number(&s_cfg, "idle_timeout", idle_sec);
     }
 
     char buf[sizeof(s_cfg.wifi_pass)]; /* 各字符串字段均 <= 本尺寸 */
@@ -116,6 +122,9 @@ bool config_store_set_json(const char *json, char *err, size_t err_len)
         if ((ret = nvs_set_u8(h, CFG_KEY_BRIGHT, tmp.brightness)) != ESP_OK) {
             break;
         }
+        if ((ret = nvs_set_u16(h, CFG_KEY_IDLE, tmp.idle_timeout)) != ESP_OK) {
+            break;
+        }
         if ((ret = nvs_set_str(h, CFG_KEY_TZ, tmp.tz)) != ESP_OK) {
             break;
         }
@@ -141,10 +150,10 @@ bool config_store_set_json(const char *json, char *err, size_t err_len)
     return true;
 }
 
-void config_store_apply_pending(void)
+bool config_store_apply_pending(void)
 {
     if (!s_apply_pending) {
-        return;
+        return false;
     }
     s_apply_pending = false;
     setenv("TZ", s_cfg.tz, 1);
@@ -153,10 +162,21 @@ void config_store_apply_pending(void)
     /* Wi-Fi 凭据与 NTP 服务器均幂等：内部对比当前值，未变化不重连/重配 SNTP */
     hal_wifi_apply_credentials(s_cfg.wifi_ssid, s_cfg.wifi_pass);
     time_sync_configure(s_cfg.ntp_server);
+    return true;
 }
 
 const char *config_store_get_json(char *buf, size_t buf_len)
 {
     config_model_to_json(&s_cfg, buf, buf_len);
     return buf;
+}
+
+uint16_t config_store_get_idle_timeout(void)
+{
+    return s_cfg.idle_timeout;
+}
+
+uint8_t config_store_get_brightness(void)
+{
+    return s_cfg.brightness;
 }
