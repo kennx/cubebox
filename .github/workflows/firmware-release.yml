@@ -45,7 +45,7 @@ jobs:
           cp build/cubebox-flash-all.bin build/release-artifacts/
           cp build/cubebox.bin build/release-artifacts/
           cp build/bootloader/bootloader.bin build/release-artifacts/bootloader.bin
-          cp build/partition_table/partition.bin build/release-artifacts/partition-table.bin
+          cp build/partition_table/partition-table.bin build/release-artifacts/partition-table.bin
           cp build/flasher_args.json build/release-artifacts/ # 分文件烧录偏移参考
 
       - name: 计算 tag 与 Release notes

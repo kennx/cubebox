@@ -23,6 +23,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # 浅克隆只含 main tip；deploy-web.sh 依赖本地 gh-pages 分支做 worktree checkout
+      # 与快进推送，此处单独拉取该 ref（无则跳过，脚本会走首次 orphan 建分支）
+      - name: 拉取 gh-pages 分支引用
+        run: git fetch origin +refs/heads/gh-pages:refs/heads/gh-pages --depth=1 || true
+
       - uses: actions/setup-node@v4
         with:
           node-version: 22
