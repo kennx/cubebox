@@ -1,0 +1,90 @@
+name: firmware-release
+
+# main 更新 → ESP-IDF 构建固件 → 合并单文件刷机镜像 → 发布 Release。
+# Release notes 为上一个 fw-* tag 到 HEAD 的 commit 列表（Conventional Commits 标题即更新说明）。
+on:
+  push:
+    branches: [main]
+  workflow_dispatch: {}
+
+permissions:
+  contents: write # 创建 tag 与 Release
+
+concurrency:
+  group: firmware-release
+  cancel-in-progress: false # 构建发版排队执行，不打断在途发布
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    container:
+      image: espressif/idf:release-v5.5 # 5.5.x 最新 patch，与本机构建（v5.5.5）一致
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # 完整历史：计算上一个 fw-* tag 到 HEAD 的 commit 范围
+          fetch-tags: true
+
+      - name: 容器内 git safe.directory
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+
+      - name: 构建固件
+        shell: bash
+        run: |
+          source "$IDF_PATH/export.sh"
+          idf.py set-target esp32c6 # sdkconfig 未入库，从 sdkconfig.defaults 生成
+          idf.py build
+
+      - name: 打包发布产物
+        shell: bash
+        run: |
+          source "$IDF_PATH/export.sh"
+          idf.py merge-bin # 默认输出 build/merged-binary.bin（输出路径经环境变量在 configure 期固化，事后设置无效，故用默认名再重命名）
+          mv build/merged-binary.bin build/cubebox-flash-all.bin
+          mkdir -p build/release-artifacts
+          cp build/cubebox-flash-all.bin build/release-artifacts/
+          cp build/cubebox.bin build/release-artifacts/
+          cp build/bootloader/bootloader.bin build/release-artifacts/bootloader.bin
+          cp build/partition_table/partition.bin build/release-artifacts/partition-table.bin
+          cp build/flasher_args.json build/release-artifacts/ # 分文件烧录偏移参考
+
+      - name: 计算 tag 与 Release notes
+        id: meta
+        shell: bash
+        run: |
+          SHA=$(git rev-parse --short HEAD)
+          VER=$(grep -oP 'PROJECT_VER \K[0-9.]+' CMakeLists.txt)
+          PREV=$(git tag -l 'fw-*' --sort=-creatordate | head -1)
+          if [ -n "$PREV" ]; then
+            LOG=$(git log --oneline --no-decorate "$PREV..HEAD")
+          else
+            LOG=$(git log --oneline --no-decorate -30) # 首次发布：最近 30 条
+          fi
+          {
+            echo "sha=$SHA"
+            echo "tag=fw-$SHA"
+            echo "name=固件 $VER ($SHA)"
+            echo "notes<<NOTES_EOF"
+            echo "## 更新内容"
+            echo '```'
+            echo "$LOG"
+            echo '```'
+            echo "固件版本 $VER（CMakeLists PROJECT_VER），对应源码 [\`$SHA\`](https://github.com/kennx/cubebox/commit/$SHA)"
+            echo ""
+            echo "## 刷机"
+            echo "进入下载模式后，单文件直刷（含 bootloader + 分区表 + 固件，推荐）："
+            echo '```'
+            echo "esptool.py --chip esp32c6 write_flash 0x0 cubebox-flash-all.bin"
+            echo '```'
+            echo "或开发环境 \`idf.py flash\`（分文件与偏移见 flasher_args.json）。"
+            echo "NOTES_EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: 发布 Release
+        uses: ncipollo/release-action@v1
+        with:
+          tag: ${{ steps.meta.outputs.tag }}
+          name: ${{ steps.meta.outputs.name }}
+          body: ${{ steps.meta.outputs.notes }}
+          artifacts: build/release-artifacts/*
+          allowUpdates: true # 同 tag 重跑时更新既有 Release

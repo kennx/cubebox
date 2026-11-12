@@ -1,0 +1,36 @@
+name: deploy-web
+
+# web/ 变更合入 main 后自动部署 gh-pages：复用 tools/deploy-web.sh（npm ci + build +
+# 临时 worktree 全量替换 gh-pages 并推送），与本地部署逻辑保持同一份。
+on:
+  push:
+    branches: [main]
+    paths:
+      - "web/**"
+      - "tools/deploy-web.sh"
+  workflow_dispatch: {}
+
+permissions:
+  contents: write # deploy-web.sh 需推 gh-pages
+
+concurrency:
+  group: deploy-web
+  cancel-in-progress: false # 部署全量替换幂等，排队执行避免互相覆盖
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: 部署 gh-pages
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          bash tools/deploy-web.sh --push
