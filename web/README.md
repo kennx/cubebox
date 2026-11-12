@@ -11,7 +11,7 @@ npm install
 npm run dev        # http://localhost:5173/cubebox/（base 已设 /cubebox/，dev 也在子路径）
 ```
 
-- **无设备开发/演示**：`http://localhost:5173/cubebox/?mock=1` 使用 localStorage 模拟设备（连接、读改配置、持久化全部可走通）。
+- **无设备开发/演示**：`http://localhost:5173/cubebox/?mock=1` 使用 localStorage 模拟设备（连接、读改配置、持久化全部可走通，含自动低功耗 idle_timeout 卡片）。
 - **真机**：Chrome/Edge 打开（Web Serial 仅 Chromium 系支持），插 USB 后点「授权并连接」（串口被 monitor/screenshot.py 占用时会打开失败，先关闭占用程序）。
 - 协议规格见 `docs/features/web-config.md`。
 
