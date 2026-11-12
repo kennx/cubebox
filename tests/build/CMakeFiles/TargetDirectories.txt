@@ -1,0 +1,7 @@
+/home/kenn/projects/cubebox/tests/build/CMakeFiles/test_apps.dir
+/home/kenn/projects/cubebox/tests/build/CMakeFiles/test_dotmatrix.dir
+/home/kenn/projects/cubebox/tests/build/CMakeFiles/test_config_model.dir
+/home/kenn/projects/cubebox/tests/build/CMakeFiles/test_low_power.dir
+/home/kenn/projects/cubebox/tests/build/CMakeFiles/test.dir
+/home/kenn/projects/cubebox/tests/build/CMakeFiles/edit_cache.dir
+/home/kenn/projects/cubebox/tests/build/CMakeFiles/rebuild_cache.dir

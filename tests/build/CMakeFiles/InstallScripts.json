@@ -1,0 +1,7 @@
+{
+	"InstallScripts" : 
+	[
+		"/home/kenn/projects/cubebox/tests/build/cmake_install.cmake"
+	],
+	"Parallel" : false
+}

@@ -1,0 +1,67 @@
+Start testing: Nov 12 18:28 CST
+----------------------------------------------------------
+1/4 Testing: test_apps
+1/4 Test: test_apps
+Command: "/home/kenn/projects/cubebox/tests/build/test_apps"
+Directory: /home/kenn/projects/cubebox/tests/build
+"test_apps" start time: Nov 12 18:28 CST
+Output:
+----------------------------------------------------------
+test_apps: all passed
+<end of output>
+Test time =   0.01 sec
+----------------------------------------------------------
+Test Passed.
+"test_apps" end time: Nov 12 18:28 CST
+"test_apps" time elapsed: 00:00:00
+----------------------------------------------------------
+
+2/4 Testing: test_dotmatrix
+2/4 Test: test_dotmatrix
+Command: "/home/kenn/projects/cubebox/tests/build/test_dotmatrix"
+Directory: /home/kenn/projects/cubebox/tests/build
+"test_dotmatrix" start time: Nov 12 18:28 CST
+Output:
+----------------------------------------------------------
+test_dotmatrix: all passed
+<end of output>
+Test time =   0.01 sec
+----------------------------------------------------------
+Test Passed.
+"test_dotmatrix" end time: Nov 12 18:28 CST
+"test_dotmatrix" time elapsed: 00:00:00
+----------------------------------------------------------
+
+3/4 Testing: test_config_model
+3/4 Test: test_config_model
+Command: "/home/kenn/projects/cubebox/tests/build/test_config_model"
+Directory: /home/kenn/projects/cubebox/tests/build
+"test_config_model" start time: Nov 12 18:28 CST
+Output:
+----------------------------------------------------------
+test_config_model: all passed
+<end of output>
+Test time =   0.01 sec
+----------------------------------------------------------
+Test Passed.
+"test_config_model" end time: Nov 12 18:28 CST
+"test_config_model" time elapsed: 00:00:00
+----------------------------------------------------------
+
+4/4 Testing: test_low_power
+4/4 Test: test_low_power
+Command: "/home/kenn/projects/cubebox/tests/build/test_low_power"
+Directory: /home/kenn/projects/cubebox/tests/build
+"test_low_power" start time: Nov 12 18:28 CST
+Output:
+----------------------------------------------------------
+test_low_power: all passed
+<end of output>
+Test time =   0.01 sec
+----------------------------------------------------------
+Test Passed.
+"test_low_power" end time: Nov 12 18:28 CST
+"test_low_power" time elapsed: 00:00:00
+----------------------------------------------------------
+
+End testing: Nov 12 18:28 CST
