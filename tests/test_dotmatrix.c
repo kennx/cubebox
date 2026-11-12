@@ -8,6 +8,45 @@
 
 #include "apps/common/dotmatrix/dotmatrix.h"
 
+static const char *const k_expected_font[] = {
+    /* '0' */ "###" "#.#" "#.#" "#.#" "###",
+    /* '1' */ ".#." "##." ".#." ".#." "###",
+    /* '2' */ "###" "..#" "###" "#.." "###",
+    /* '3' */ "###" "..#" ".##" "..#" "###",
+    /* '4' */ "#.#" "#.#" "###" "..#" "..#",
+    /* '5' */ "###" "#.." "###" "..#" "###",
+    /* '6' */ "###" "#.." "###" "#.#" "###",
+    /* '7' */ "###" "..#" ".#." ".#." ".#.",
+    /* '8' */ "###" "#.#" "###" "#.#" "###",
+    /* '9' */ "###" "#.#" "###" "..#" "###",
+    /* 'A' */ ".#." "#.#" "###" "#.#" "#.#",
+    /* 'B' */ "##." "#.#" "##." "#.#" "##.",
+    /* 'C' */ ".##" "#.." "#.." "#.." ".##",
+    /* 'D' */ "##." "#.#" "#.#" "#.#" "##.",
+    /* 'E' */ "###" "#.." "##." "#.." "###",
+    /* 'F' */ "###" "#.." "##." "#.." "#..",
+    /* 'G' */ ".##" "#.." "#.#" "#.#" ".##",
+    /* 'H' */ "#.#" "#.#" "###" "#.#" "#.#",
+    /* 'I' */ "###" ".#." ".#." ".#." "###",
+    /* 'J' */ "..#" "..#" "..#" "#.#" ".#.",
+    /* 'K' */ "#.#" "#.#" "##." "#.#" "#.#",
+    /* 'L' */ "#.." "#.." "#.." "#.." "###",
+    /* 'M' */ "#.#" "###" "###" "#.#" "#.#",
+    /* 'N' */ "###" "#.#" "#.#" "#.#" "#.#",
+    /* 'O' */ ".#." "#.#" "#.#" "#.#" ".#.",
+    /* 'P' */ "##." "#.#" "#.#" "##." "#..",
+    /* 'Q' */ ".#." "#.#" "#.#" "##." ".##",
+    /* 'R' */ "##." "#.#" "#.#" "##." "#.#",
+    /* 'S' */ ".##" "#.." ".#." "..#" "##.",
+    /* 'T' */ "###" ".#." ".#." ".#." ".#.",
+    /* 'U' */ "#.#" "#.#" "#.#" "#.#" "###",
+    /* 'V' */ "#.#" "#.#" "#.#" "#.#" ".#.",
+    /* 'W' */ "#.#" "#.#" "###" "###" "#.#",
+    /* 'X' */ "#.#" "#.#" ".#." "#.#" "#.#",
+    /* 'Y' */ "#.#" "#.#" ".#." ".#." ".#.",
+    /* 'Z' */ "###" "..#" ".#." "#.." "###",
+};
+
 static void expect(int cond, const char *label)
 {
     if (!cond) {
@@ -43,6 +82,22 @@ int main(void)
     }
     for (char ch = 'A'; ch <= 'Z'; ch++) {
         expect(dotmatrix_glyph_get(ch, &glyph) == true, "glyph: uppercase");
+    }
+    {
+        static const char chars[] = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+        for (int i = 0; chars[i] != '\0'; i++) {
+            const char *art = k_expected_font[i];
+            uint16_t expected = 0;
+            for (int r = 0; r < 5; r++) {
+                for (int c = 0; c < 3; c++) {
+                    if (art[r * 3 + c] == '#') {
+                        expected |= (uint16_t)(1u << (14 - 3 * r - c));
+                    }
+                }
+            }
+            expect(dotmatrix_glyph_get(chars[i], &glyph) == true, "glyph: SVG character available");
+            expect(glyph == expected, "glyph: matches SVG 3x5 design");
+        }
     }
     for (char ch = 'a'; ch <= 'z'; ch++) {
         uint16_t lower = 0, upper = 0;
@@ -109,17 +164,18 @@ int main(void)
     dotmatrix_draw_text_centered(&g2, "12 34");
     expect(grid_diff_count(&g, &g2) == 2, "colon->space diff is exactly 2 dots");
 
-    /* 8. "OK" 居中：起始列 8；O 顶行亮、K 顶行中列灭 */
+    /* 8. "OK" 居中：起始列 8；O 顶行中列亮、K 顶行中列灭 */
     dotmatrix_clear(&g);
     dotmatrix_draw_text_centered(&g, "OK");
-    expect(dotmatrix_get(&g, 9, 8) == true, "OK: 'O' top-left at (9,8)");
+    expect(dotmatrix_get(&g, 9, 8) == false, "OK: 'O' top-left off");
+    expect(dotmatrix_get(&g, 9, 9) == true, "OK: 'O' top center at (9,9)");
     expect(dotmatrix_get(&g, 9, 12) == true, "OK: 'K' top-left at (9,12)");
     expect(dotmatrix_get(&g, 9, 13) == false, "OK: 'K' top center off");
 
     /* 9. 越界裁剪：右缘与负坐标不越界写、可见部分正确 */
     dotmatrix_clear(&g);
     dotmatrix_draw_char(&g, 0, 21, 'A'); /* 占列 21..23，列 23 裁剪 */
-    expect(dotmatrix_get(&g, 0, 21) == true, "clip right: (0,21) on");
+    expect(dotmatrix_get(&g, 0, 21) == false, "clip right: (0,21) off");
     expect(dotmatrix_get(&g, 0, 22) == true, "clip right: (0,22) on");
     expect(dotmatrix_get(&g, 1, 21) == true, "clip right: 'A' row1 left on");
     expect(dotmatrix_get(&g, 1, 22) == false, "clip right: 'A' row1 center off");
@@ -135,7 +191,8 @@ int main(void)
     /* 10. 超长文本（40 列 > 23）：不崩溃，居中截断后 'C' 起始列 0 */
     dotmatrix_clear(&g);
     dotmatrix_draw_text_centered(&g, "ABCDEFGHIJ");
-    expect(dotmatrix_get(&g, 9, 0) == true, "overflow: 'C' top-left at (9,0)");
+    expect(dotmatrix_get(&g, 9, 0) == false, "overflow: 'C' top-left off");
+    expect(dotmatrix_get(&g, 9, 1) == true, "overflow: 'C' top center at (9,1)");
     expect(dotmatrix_get(&g, 9, 3) == false, "overflow: gap column off");
     expect(dotmatrix_get(&g, 9, 21) == false, "overflow: 'H' center off");
 
