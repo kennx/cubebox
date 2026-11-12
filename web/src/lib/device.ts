@@ -13,6 +13,7 @@ export interface DeviceInfo {
 
 export interface DeviceConfig {
   brightness: number; // 0-100
+  idle_timeout?: number; // 自动低功耗秒数 {0,30,60,300,600}，0=永不；旧固件（proto<3）无此字段
   tz: string;
   wifi_ssid: string;
   wifi_pass_set: boolean;
@@ -21,6 +22,7 @@ export interface DeviceConfig {
 
 export interface ConfigPatch {
   brightness?: number;
+  idle_timeout?: number;
   tz?: string;
   wifi_ssid?: string;
   wifi_pass?: string;
@@ -285,17 +287,25 @@ type MockState = Required<ConfigPatch>;
 
 const MOCK_DEFAULTS: MockState = {
   brightness: 80,
+  idle_timeout: 30,
   tz: "CST-8",
   wifi_ssid: "",
   wifi_pass: "",
   ntp_server: "ntp.aliyun.com",
 };
 
+/** 与固件 config_model 一致的白名单（秒；0=永不） */
+const IDLE_TIMEOUT_WHITELIST = [0, 30, 60, 300, 600];
+
 /** 与固件 config_model 相同的验证规则（ssid/pass 允许可打印 ASCII 与合法 UTF-8，字节计长） */
 function mockValidate(patch: ConfigPatch): void {
   if (patch.brightness !== undefined) {
     if (!Number.isInteger(patch.brightness) || patch.brightness < 0 || patch.brightness > 100)
       throw new Error("bad field: brightness");
+  }
+  if (patch.idle_timeout !== undefined) {
+    if (!IDLE_TIMEOUT_WHITELIST.includes(patch.idle_timeout))
+      throw new Error("bad field: idle_timeout");
   }
   if (patch.tz !== undefined) {
     if (!/^[A-Za-z0-9+\-,./:<>]{1,39}$/.test(patch.tz)) throw new Error("bad field: tz");
@@ -339,6 +349,7 @@ class MockDevice implements Device {
     const s = this.load();
     return {
       brightness: s.brightness,
+      idle_timeout: s.idle_timeout,
       tz: s.tz,
       wifi_ssid: s.wifi_ssid,
       wifi_pass_set: s.wifi_pass !== "",
@@ -354,6 +365,7 @@ class MockDevice implements Device {
     localStorage.setItem(MOCK_KEY, JSON.stringify(s));
     return {
       brightness: s.brightness,
+      idle_timeout: s.idle_timeout,
       tz: s.tz,
       wifi_ssid: s.wifi_ssid,
       wifi_pass_set: s.wifi_pass !== "",

@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import type { Device, DeviceConfig, DeviceInfo } from "../lib/device";
 import BrightnessCard from "./BrightnessCard";
+import IdleTimeoutCard from "./IdleTimeoutCard";
 import TimeCard from "./TimeCard";
 import TimezoneCard from "./TimezoneCard";
 import WifiCard from "./WifiCard";
@@ -31,6 +32,9 @@ export default function ConfigScreen({ device, info, onDisconnect }: Props) {
   };
   const saveBrightness = async (value: number) => {
     setCfg(await device.setCfg({ brightness: value }));
+  };
+  const saveIdleTimeout = async (value: number) => {
+    setCfg(await device.setCfg({ idle_timeout: value }));
   };
   const saveTz = async (tz: string) => {
     setCfg(await device.setCfg({ tz }));
@@ -83,10 +87,11 @@ export default function ConfigScreen({ device, info, onDisconnect }: Props) {
             <>
               <div className="panel-head">
                 <h1>通用配置</h1>
-                <p className="muted">Wi-Fi、屏幕亮度与时区，保存即生效</p>
+                <p className="muted">Wi-Fi、屏幕亮度、自动低功耗与时区，保存即生效</p>
               </div>
               <WifiCard device={device} cfg={cfg} onSave={saveWifi} />
               <BrightnessCard brightness={cfg.brightness} onChange={saveBrightness} />
+              <IdleTimeoutCard idleTimeout={cfg.idle_timeout ?? 30} onChange={saveIdleTimeout} />
               <TimezoneCard tz={cfg.tz} onSave={saveTz} />
             </>
           ) : (
