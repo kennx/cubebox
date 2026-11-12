@@ -33,8 +33,9 @@ export default function App() {
     }
   }, [reset]);
 
-  const handleDisconnect = useCallback(() => {
-    void device?.disconnect();
+  const handleDisconnect = useCallback(async () => {
+    /* 等串口真正关闭再回连接页，避免断开后立即重连时端口尚未释放 */
+    await device?.disconnect();
     reset();
   }, [device, reset]);
 

@@ -130,6 +130,9 @@ class SerialDevice implements Device {
   }
 
   async disconnect(): Promise<void> {
+    /* 置位标志：pump 退出时不再触发 onDisconnect 回调（主动断开由调用方自行复位 UI），
+       也避免与 teardown 并发的第二次 teardown */
+    this.disconnectedFired = true;
     await this.teardown();
   }
 
@@ -261,20 +264,33 @@ class SerialDevice implements Device {
       this.waiter = null;
     }
     navigator.serial.removeEventListener("disconnect", this.onSerialDisconnect);
-    try {
-      this.reader?.cancel();
-    } catch {
-      /* 已关闭 */
-    }
+    /* Web Serial 关闭顺序（MDN）：cancel 让 read() 以 done 退出但不释放锁，
+       必须 releaseLock 解锁 readable/writable 后 port.close() 才会真正关闭串口 */
+    const reader = this.reader;
     this.reader = null;
     try {
+      await reader?.cancel();
+    } catch {
+      /* 流已 errored（如拔线） */
+    }
+    try {
+      reader?.releaseLock();
+    } catch {
+      /* 已释放 */
+    }
+    try {
       this.writer?.releaseLock();
-      await this.port?.close();
+    } catch {
+      /* 写入进行中或已释放 */
+    }
+    this.writer = null;
+    const port = this.port;
+    this.port = null;
+    try {
+      await port?.close();
     } catch {
       /* 已关闭 */
     }
-    this.writer = null;
-    this.port = null;
   }
 }
 
