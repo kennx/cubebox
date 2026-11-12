@@ -157,6 +157,10 @@ idf.py set-target esp32c6
 
 ## 工作流要求
 
+- **分支与发布**：
+  - `main` 是发布分支；日常开发必须在 `dev`、基于 `dev` 的特性分支或 worktree 中进行，不直接在 `main` 上提交。
+  - `dev` 合入 `main` 后由 `firmware-release` 工作流自动发布 GitHub Release。tag 使用 `vMAJOR.MINOR.PATCH`（如 `v1.8.12`），并根据上一个 `v*` tag 以来的 Conventional Commits 自动升级：`BREAKING CHANGE` 或 `!` 升主版本，`feat` 升次版本，其余程序修改升补丁版本；不得再使用 SHA 作为 Release tag。
+  - 纯文档修改（`docs/**` 或任意 `*.md`，且未改变程序）不得触发 GitHub Actions；新增或修改工作流必须配置相应 `paths` / `paths-ignore`。程序与文档混合修改仍须正常触发。
 - **git commit 规范**：
   - 标题行使用 Conventional Commits 格式（`feat:` / `fix:` / `refactor:` / `chore:` / `docs:` 等）。
   - body 中按文件或功能分组，说明改了什么、为什么改、影响范围。

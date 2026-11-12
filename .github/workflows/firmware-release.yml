@@ -1,10 +1,13 @@
 name: firmware-release
 
-# main 更新 → ESP-IDF 构建固件 → 合并单文件刷机镜像 → 发布 Release。
-# Release notes 为上一个 fw-* tag 到 HEAD 的 commit 列表（Conventional Commits 标题即更新说明）。
+# main 的程序更新 → ESP-IDF 构建固件 → 合并单文件刷机镜像 → 按 Conventional Commits 自动升级 vx.x.x 并发布 Release。
+# 纯文档变更不触发；Release notes 为上一个 v* tag 到 HEAD 的 commit 列表。
 on:
   push:
     branches: [main]
+    paths-ignore:
+      - "docs/**"
+      - "**/*.md"
   workflow_dispatch: {}
 
 permissions:
@@ -22,7 +25,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          fetch-depth: 0 # 完整历史：计算上一个 fw-* tag 到 HEAD 的 commit 范围
+          fetch-depth: 0 # 完整历史：计算上一个 v* tag 到 HEAD 的 commit 范围及语义化版本
           fetch-tags: true
 
       - name: 容器内 git safe.directory
@@ -48,28 +51,50 @@ jobs:
           cp build/partition_table/partition-table.bin build/release-artifacts/partition-table.bin
           cp build/flasher_args.json build/release-artifacts/ # 分文件烧录偏移参考
 
-      - name: 计算 tag 与 Release notes
+      - name: 计算语义化 tag 与 Release notes
         id: meta
         shell: bash
         run: |
+          set -euo pipefail
           SHA=$(git rev-parse --short HEAD)
-          VER=$(grep -oP 'PROJECT_VER \K[0-9.]+' CMakeLists.txt)
-          PREV=$(git tag -l 'fw-*' --sort=-creatordate | grep -v "^fw-$SHA\$" | head -1) # 排除自身：同 SHA 重跑时避免空 notes 覆盖
+          PREV=$(git tag -l 'v*' --merged HEAD --sort=-version:refname | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | head -1 || true)
+          EXISTING=$(git tag --points-at HEAD -l 'v*' --sort=-version:refname | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | head -1 || true)
+          if [ -n "$EXISTING" ]; then
+            TAG=$EXISTING # 同一提交重跑时复用 tag，不重复升级
+            PREV=$(git tag -l 'v*' --merged HEAD --sort=-version:refname | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | grep -vx "$TAG" | head -1 || true)
+          else
+            if [ -n "$PREV" ]; then
+              BASE=${PREV#v}
+              COMMITS=$(git log --format=%B "$PREV..HEAD")
+              SUBJECTS=$(git log --format=%s "$PREV..HEAD")
+            else
+              BASE=$(grep -oP 'set\(PROJECT_VER \K[0-9]+\.[0-9]+\.[0-9]+' CMakeLists.txt | head -1)
+              COMMITS=$(git log -1 --format=%B) # 首次发布以 PROJECT_VER 为基线，只评估当前提交
+              SUBJECTS=$(git log -1 --format=%s)
+            fi
+            IFS=. read -r MAJOR MINOR PATCH <<< "$BASE"
+            if grep -Eq '^BREAKING[ -]CHANGE:' <<< "$COMMITS" || grep -Eq '^[A-Za-z]+(\([^)]+\))?!:' <<< "$SUBJECTS"; then
+              TAG="v$((MAJOR + 1)).0.0"
+            elif grep -Eq '^feat(\([^)]+\))?:' <<< "$SUBJECTS"; then
+              TAG="v$MAJOR.$((MINOR + 1)).0"
+            else
+              TAG="v$MAJOR.$MINOR.$((PATCH + 1))"
+            fi
+          fi
           if [ -n "$PREV" ]; then
             LOG=$(git log --oneline --no-decorate "$PREV..HEAD")
           else
             LOG=$(git log --oneline --no-decorate -30) # 首次发布：最近 30 条
           fi
           {
-            echo "sha=$SHA"
-            echo "tag=fw-$SHA"
-            echo "name=固件 $VER ($SHA)"
+            echo "tag=$TAG"
+            echo "name=固件 $TAG"
             echo "notes<<NOTES_EOF"
             echo "## 更新内容"
             echo '```'
             echo "$LOG"
             echo '```'
-            echo "固件版本 $VER（CMakeLists PROJECT_VER），对应源码 [\`$SHA\`](https://github.com/kennx/cubebox/commit/$SHA)"
+            echo "Release $TAG，对应源码 [\`$SHA\`](https://github.com/kennx/cubebox/commit/$SHA)"
             echo ""
             echo "## 刷机"
             echo "进入下载模式后，单文件直刷（含 bootloader + 分区表 + 固件，推荐）："
@@ -84,6 +109,7 @@ jobs:
         uses: ncipollo/release-action@339a81892b84b4eeb0f6e744e4574d79d0d9b8dd # v1，第三方 action 按 SHA 固定（供应链）
         with:
           tag: ${{ steps.meta.outputs.tag }}
+          commit: ${{ github.sha }} # 新 tag 固定到本次构建提交，避免排队发布时指向后续 main
           name: ${{ steps.meta.outputs.name }}
           body: ${{ steps.meta.outputs.notes }}
           artifacts: build/release-artifacts/*

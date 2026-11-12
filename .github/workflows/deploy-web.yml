@@ -8,6 +8,7 @@ on:
     paths:
       - "web/**"
       - "tools/deploy-web.sh"
+      - "!web/**/*.md"
   workflow_dispatch: {}
 
 permissions:
