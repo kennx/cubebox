@@ -4,5 +4,6 @@ dependencies:
   lvgl/lvgl: ^8.3.11
   waveshare/esp_lcd_touch_cst9217: ^1.0.4
   waveshare/pcf85063a: ^1.1.1
+  waveshare/qmi8658: ^1.0.1
   idf:
     version: '>=4.1.0'

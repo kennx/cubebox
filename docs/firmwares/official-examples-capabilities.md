@@ -11,7 +11,7 @@
 | 显示 | SH8601/CO5300 AMOLED 480×480 | QSPI 4-bit, 40MHz | 07/08/09 | ✅ 已实现 |
 | 背光调节 | SH8601 命令 0x51 | — (无独立 GPIO) | 07/08/09 | ✅ 已实现 |
 | 触摸 | CST9220(cst9217 库) | I2C0 @0x5A, 400kHz;INT=5/RST=11 | 07/08/09 | ✅ 已实现 |
-| IMU 六轴 | QMI8658(waveshare/qmi8658) | I2C0 @0x6A(SA0 接地) | 02 | ✅ 已实现 |
+| IMU 六轴 | QMI8658(waveshare/qmi8658) | I2C0 @0x6B(SA0 接高电平) | 02 | ✅ 已实现 |
 | RTC | PCF85063(waveshare/pcf85063a) | I2C0 @0x51 | 03 | ✅ 已实现 |
 | TF 卡 | SDSPI 1-bit + FAT | SPI2:CLK=0/MOSI=1/MISO=2/CS=6 | 04 | ✅ 已实现 |
 | 音频输出 | ES8311 + esp_codec_dev | I2C0 @0x18;I2S TDM | 07 | ✅ 已实现 |
@@ -53,7 +53,7 @@
 
 ### 4. IMU 六轴(QMI8658,`waveshare/qmi8658 ^1.0.1` 组件)
 
-- 地址 0x6A(`QMI8658_ADDRESS_HIGH`,SA0 接地),挂共享 I2C0。
+- 地址 0x6B(`QMI8658_ADDRESS_HIGH`,SA0 接高电平),挂共享 I2C0（CubeBox 实机验证）。
 - 配置(02 示例):加速度 **±8g @1000Hz**、陀螺仪 **512dps @1000Hz**、单位 m/s² 与 rad/s、`qmi8658_set_display_precision(4)` 设 4 位换算精度(注意:main 的日志 snprintf 用 `%.2f`,实际打印 2 位小数)。
 - 读取流程:500ms 轮询 `qmi8658_is_data_ready`(DRDY)→ `qmi8658_read_sensor_data` 得六轴浮点 → 日志打印。
 

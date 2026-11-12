@@ -29,7 +29,9 @@ main/
 │   ├── hal_rtc.*     # PCF85063 RTC（电池走时，存 UTC）
 │   ├── hal_wifi.*    # Wi-Fi STA 连接（幂等凭据应用）+ 附近 AP 扫描
 │   ├── hal_button.*  # KEY 用户按键（GPIO10 内部上拉、低有效，轮询接口）
-│   └── hal_display.* # SH8601 QSPI 面板 + LVGL 驱动 + 截图流式输出 + 背光
+│   ├── hal_imu.*     # QMI8658 加速度计低频姿态读取（gui_task 上下文）
+│   ├── hal_orientation.* # 四方向判定纯逻辑：倾斜保持 + 连续 3 次确认（主机可测）
+│   └── hal_display.* # SH8601 QSPI 面板 + LVGL 驱动/四方向软件旋转 + 截图 + 背光
 └── apps/             # 应用层
     ├── apps.{c,h}    # 应用框架：注册表 + 生命周期状态机（主机可测纯 C）
     ├── common/       # 跨应用共享组件（约定见 common/README.md）
@@ -44,9 +46,9 @@ docs/apps/            # 每个应用一份说明文档（强制，见"分层架�
 docs/features/        # 功能规格文档（如 web-config.md：USB 配置协议规格）
 ```
 
-- `main/main.c`：app_main 初始化顺序（TF CS 释放、I2C 总线、HAL、hal_rtc/hal_wifi/time_sync、config_store_init、安装应用并请求启动默认应用 clock）、gui_task 主循环（截图请求 → `config_store_apply_pending()` → `low_power_service()` → `apps_update()` → `lv_timer_handler`）、USB 调试 console 任务（SNAP/NEXT/REBOOT/WAKE/PING/GETCFG/SETCFG/SCAN/TIME 命令）。应用安装顺序即左右滑动的切换顺序（clock → test，循环）。
+- `main/main.c`：app_main 初始化顺序（TF CS 释放、I2C 总线、HAL、hal_rtc/hal_wifi/time_sync、config_store_init、安装应用并请求启动默认应用 clock）、gui_task 主循环（截图请求 → `config_store_apply_pending()` → `hal_imu_service()` → `low_power_service()` → `apps_update()` → `lv_timer_handler`）、USB 调试 console 任务（SNAP/NEXT/REBOOT/WAKE/PING/GETCFG/SETCFG/SCAN/TIME 命令）。应用安装顺序即左右滑动的切换顺序（clock → test，循环）。
 - `main/CMakeLists.txt`：主组件构建配置。`hal/` 与 `apps/` 源码按 GLOB_RECURSE 递归收集——**新增/删除源文件后必须 `idf.py reconfigure`**（GLOB 仅在 configure 时求值，直接 build 不会感知新文件）；落在 main/ 根的源文件（如 config_*.c）不被 GLOB 覆盖，须显式加入 SRCS。
-- `main/idf_component.yml`：IDF 组件管理器清单。当前依赖 `espressif/esp_lcd_sh8601`、`lvgl/lvgl`、`waveshare/esp_lcd_touch_cst9217` 与 `waveshare/pcf85063a`。
+- `main/idf_component.yml`：IDF 组件管理器清单。当前依赖 `espressif/esp_lcd_sh8601`、`lvgl/lvgl`、`waveshare/esp_lcd_touch_cst9217`、`waveshare/pcf85063a` 与 `waveshare/qmi8658`。
 - `docs/hardwares/`：硬件规格与参考文档。
 - `docs/firmwares/`：官方固件研究——Waveshare ESP-IDF 示例的目录结构与设备能力清单（蓝牙/BOOT 键官方未实现；触摸方向参数、AXP2101 轨配置等官方事实）。
 - `docs/apps/`：应用说明文档，每个 `app_*` 一份（如 `app_clock.md`）。
@@ -132,7 +134,7 @@ idf.py set-target esp32c6
   | AXP2101 | 0x34 | 电源管理 |
   | ES8311 | 0x18 | 音频编解码 |
   | ES7210 | 0x40 | 回声消除 ADC |
-  | QMI8658 | 0x6A | IMU 惯性传感器（SA0 接地） |
+  | QMI8658 | 0x6B | IMU 惯性传感器（SA0 接高电平，实机验证） |
   | PCF85063 | 0x51 | RTC 实时时钟（由 AXP2101 电池备份供电） |
   | CST9220 | 0x5A | 电容触摸控制器 |
 - **屏幕与触摸**：

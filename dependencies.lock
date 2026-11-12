@@ -68,12 +68,23 @@ dependencies:
       registry_url: https://components.espressif.com/
       type: service
     version: 1.1.1
+  waveshare/qmi8658:
+    component_hash: 0f849356dfdcd3c868ad37a74a2cbb00892c69b3b1b18854172715f6eb980e5b
+    dependencies:
+    - name: idf
+      require: private
+      version: '>=5.3.2'
+    source:
+      registry_url: https://components.espressif.com/
+      type: service
+    version: 1.0.1
 direct_dependencies:
 - espressif/esp_lcd_sh8601
 - idf
 - lvgl/lvgl
 - waveshare/esp_lcd_touch_cst9217
 - waveshare/pcf85063a
-manifest_hash: 4dea050ffe685909f6f8bf3ded1fc069dc0a28aac2a41233cd6d3f047d712dc7
+- waveshare/qmi8658
+manifest_hash: cd9420837ca1037dcac4f23431ceefc371d6a10c23e59d818f5345be47afde84
 target: esp32c6
 version: 2.0.0

@@ -193,9 +193,10 @@ static void low_power_service(bool config_applied)
  * gui_task：全固件唯一允许调用 LVGL 的上下文。每循环：
  *   1. 截图请求 → 强制全屏 invalidate（flush_cb 流出全部条带）
  *   2. config_store_apply_pending：消费配置副作用（亮度/tz/Wi-Fi/NTP，console 置位）
- *   3. low_power_service：推进低功耗状态机（切 app 请求与背光动作都在本上下文）
- *   4. apps_update：消费跨任务的应用切换请求 + 调当前应用 on_running
- *   5. lv_timer_handler 驱动 LVGL 刷新
+ *   3. hal_imu_service：低频读取姿态，稳定换向后旋转显示与触摸
+ *   4. low_power_service：推进低功耗状态机（切 app 请求与背光动作都在本上下文）
+ *   5. apps_update：消费跨任务的应用切换请求 + 调当前应用 on_running
+ *   6. lv_timer_handler 驱动 LVGL 刷新
  */
 static void gui_task(void *arg)
 {
@@ -207,6 +208,8 @@ static void gui_task(void *arg)
         }
 
         bool config_applied = config_store_apply_pending();
+
+        hal_imu_service();
 
         low_power_service(config_applied);
 
@@ -245,10 +248,11 @@ void app_main(void)
     i2c_master_bus_handle_t i2c_bus = NULL;
     ESP_ERROR_CHECK(i2c_new_master_bus(&bus_cfg, &i2c_bus));
 
-    /* HAL：先电源后显示（显示复位依赖 ALDO3），再触摸/RTC/KEY（失败不致命） */
+    /* HAL：先电源后显示（显示复位依赖 ALDO3），再触摸/IMU/RTC/KEY（失败不致命） */
     hal_power_init(i2c_bus);
     hal_display_init();
     hal_touch_init(i2c_bus);
+    hal_imu_init(i2c_bus);
     hal_rtc_init(i2c_bus);
     hal_button_init();
 

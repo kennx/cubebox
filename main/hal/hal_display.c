@@ -98,6 +98,31 @@ void hal_display_set_backlight(uint8_t brightness)
     }
 }
 
+void hal_display_set_orientation(hal_orientation_t orientation)
+{
+    lv_disp_rot_t rotation;
+    switch (orientation) {
+    case HAL_ORIENTATION_0:
+        rotation = LV_DISP_ROT_NONE;
+        break;
+    case HAL_ORIENTATION_90:
+        rotation = LV_DISP_ROT_90;
+        break;
+    case HAL_ORIENTATION_180:
+        rotation = LV_DISP_ROT_180;
+        break;
+    case HAL_ORIENTATION_270:
+        rotation = LV_DISP_ROT_270;
+        break;
+    default:
+        return;
+    }
+    lv_disp_t *disp = lv_disp_get_default();
+    if (disp != NULL && lv_disp_get_rotation(disp) != rotation) {
+        lv_disp_set_rotation(disp, rotation);
+    }
+}
+
 static bool notify_lvgl_flush_ready(esp_lcd_panel_io_handle_t panel_io, esp_lcd_panel_io_event_data_t *edata, void *user_ctx)
 {
     lv_disp_drv_t *disp_driver = (lv_disp_drv_t *)user_ctx;
@@ -150,7 +175,15 @@ static void lvgl_flush_cb(lv_disp_drv_t *drv, const lv_area_t *area, lv_color_t 
             s_snap_line[n++] = '\n';
             usb_serial_jtag_write_bytes(s_snap_line, n, pdMS_TO_TICKS(1000));
         }
-        if (offsety2 == LCD_HEIGHT - 1) {
+        bool last_strip = offsety2 == LCD_HEIGHT - 1;
+        if (drv->rotated == LV_DISP_ROT_90) {
+            last_strip = offsetx2 == LCD_WIDTH - 1;
+        } else if (drv->rotated == LV_DISP_ROT_270) {
+            last_strip = offsetx1 == 0;
+        } else if (drv->rotated == LV_DISP_ROT_180) {
+            last_strip = offsety1 == 0;
+        }
+        if (last_strip) {
             usb_serial_jtag_write_bytes("#SNAP END\n", 10, pdMS_TO_TICKS(1000));
             s_snap_active = false;
         }
@@ -254,6 +287,7 @@ void hal_display_init(void)
     disp_drv.hor_res = LCD_WIDTH;
     disp_drv.ver_res = LCD_HEIGHT;
     disp_drv.flush_cb = lvgl_flush_cb;
+    disp_drv.sw_rotate = 1;
     disp_drv.draw_buf = &disp_buf;
     disp_drv.user_data = s_lcd_panel;
     disp_drv.rounder_cb = lvgl_rounder_cb;

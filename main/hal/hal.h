@@ -9,3 +9,5 @@
 #include "hal/hal_rtc.h"
 #include "hal/hal_wifi.h"
 #include "hal/hal_button.h"
+#include "hal/hal_imu.h"
+#include "hal/hal_orientation.h"

@@ -50,3 +50,14 @@ target_compile_options(test_low_power PRIVATE -Wall -Werror -fsanitize=address,u
 target_link_options(test_low_power PRIVATE -fsanitize=address,undefined)
 
 add_test(NAME test_low_power COMMAND test_low_power)
+
+add_executable(test_orientation
+    test_orientation.c
+    ../main/hal/hal_orientation.c
+)
+
+target_include_directories(test_orientation PRIVATE ../main)
+target_compile_options(test_orientation PRIVATE -Wall -Werror -fsanitize=address,undefined)
+target_link_options(test_orientation PRIVATE -fsanitize=address,undefined)
+
+add_test(NAME test_orientation COMMAND test_orientation)
