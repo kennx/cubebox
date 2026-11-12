@@ -24,3 +24,7 @@ tools/deploy-web.sh --push    # 同时推送 origin gh-pages
 ```
 
 首次部署后需在 GitHub 仓库 **Settings → Pages** 选择 `gh-pages` 分支（目录 `/root`），此后每次 push 即上线。
+
+### 自动部署（CI）
+
+`.github/workflows/deploy-web.yml`：`web/**` 或 `tools/deploy-web.sh` 变更合入 `main` 后自动执行同一份 `deploy-web.sh --push` 部署；日常无需手动跑。手动部署仍可用于未合入 main 的验证。
