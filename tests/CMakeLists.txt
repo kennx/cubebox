@@ -39,3 +39,14 @@ target_compile_options(test_config_model PRIVATE -Wall -Werror -fsanitize=addres
 target_link_options(test_config_model PRIVATE -fsanitize=address,undefined)
 
 add_test(NAME test_config_model COMMAND test_config_model)
+
+add_executable(test_low_power
+    test_low_power.c
+    ../main/low_power.c
+)
+
+target_include_directories(test_low_power PRIVATE ../main)
+target_compile_options(test_low_power PRIVATE -Wall -Werror -fsanitize=address,undefined)
+target_link_options(test_low_power PRIVATE -fsanitize=address,undefined)
+
+add_test(NAME test_low_power COMMAND test_low_power)
