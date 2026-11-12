@@ -40,6 +40,7 @@ int main(void)
     /* ---- defaults ---- */
     config_model_defaults(&cfg);
     expect(cfg.brightness == 100, "default brightness 100");
+    expect(cfg.idle_timeout == 30, "default idle_timeout 30");
     expect_str(cfg.tz, "CST-8", "default tz CST-8");
     expect_str(cfg.wifi_ssid, "", "default ssid empty");
     expect_str(cfg.wifi_pass, "", "default pass empty");
@@ -57,6 +58,25 @@ int main(void)
     /* 未知 key：忽略并返回 true，不改动 */
     expect(config_model_set_number(&cfg, "foo", 42) == true, "unknown number key ignored");
     expect(cfg.brightness == 100, "brightness unchanged by unknown key");
+
+    /* ---- set_number: idle_timeout（白名单 0/30/60/300/600 秒，0=永不） ---- */
+    expect(config_model_set_number(&cfg, "idle_timeout", 30) == true, "idle_timeout 30 accepted");
+    expect(cfg.idle_timeout == 30, "idle_timeout 30 stored");
+    expect(config_model_set_number(&cfg, "idle_timeout", 0) == true, "idle_timeout 0 (never) accepted");
+    expect(cfg.idle_timeout == 0, "idle_timeout 0 stored");
+    expect(config_model_set_number(&cfg, "idle_timeout", 60) == true, "idle_timeout 60 accepted");
+    expect(cfg.idle_timeout == 60, "idle_timeout 60 stored");
+    expect(config_model_set_number(&cfg, "idle_timeout", 300) == true, "idle_timeout 300 accepted");
+    expect(config_model_set_number(&cfg, "idle_timeout", 600) == true, "idle_timeout 600 accepted");
+    expect(cfg.idle_timeout == 600, "idle_timeout 600 stored");
+    /* 非白名单整数拒绝且不改动 */
+    expect(config_model_set_number(&cfg, "idle_timeout", 45) == false, "idle_timeout 45 rejected");
+    expect(config_model_set_number(&cfg, "idle_timeout", 29) == false, "idle_timeout 29 rejected");
+    expect(config_model_set_number(&cfg, "idle_timeout", 31) == false, "idle_timeout 31 rejected");
+    expect(config_model_set_number(&cfg, "idle_timeout", 6000) == false, "idle_timeout 6000 rejected");
+    expect(config_model_set_number(&cfg, "idle_timeout", -1) == false, "idle_timeout -1 rejected");
+    expect(config_model_set_number(&cfg, "idle_timeout", 30.5) == false, "idle_timeout 30.5 rejected");
+    expect(cfg.idle_timeout == 600, "idle_timeout unchanged after rejects");
 
     /* ---- set_string: tz ---- */
     expect(config_model_set_string(&cfg, "tz", "CST-8") == true, "tz CST-8 accepted");
@@ -145,6 +165,7 @@ int main(void)
     expect(config_model_set_number(&cfg, "wifi_pass", 1) == false, "set_number on pass rejected");
     expect(config_model_set_number(&cfg, "ntp_server", 1) == false, "set_number on ntp_server rejected");
     expect(config_model_set_string(&cfg, "brightness", "40") == false, "set_string on number key rejected");
+    expect(config_model_set_string(&cfg, "idle_timeout", "30") == false, "set_string on idle_timeout rejected");
     expect(cfg.brightness == 100 && cfg.brightness != 40, "brightness unchanged by type mismatch");
 
     /* ---- 验证失败不改动：tz 拒后仍为上次合法值 ---- */
@@ -157,16 +178,17 @@ int main(void)
     char json[512];
     config_model_to_json(&cfg, json, sizeof(json));
     expect_str(json,
-               "{\"brightness\":100,\"tz\":\"CST-8\",\"wifi_ssid\":\"\",\"wifi_pass_set\":false,"
+               "{\"brightness\":100,\"idle_timeout\":30,\"tz\":\"CST-8\",\"wifi_ssid\":\"\",\"wifi_pass_set\":false,"
                "\"ntp_server\":\"ntp.aliyun.com\"}",
                "to_json defaults exact");
 
     config_model_set_string(&cfg, "wifi_ssid", "Home");
     config_model_set_string(&cfg, "wifi_pass", "p");
     config_model_set_string(&cfg, "ntp_server", "cn.pool.ntp.org");
+    config_model_set_number(&cfg, "idle_timeout", 0);
     config_model_to_json(&cfg, json, sizeof(json));
     expect_str(json,
-               "{\"brightness\":100,\"tz\":\"CST-8\",\"wifi_ssid\":\"Home\",\"wifi_pass_set\":true,"
+               "{\"brightness\":100,\"idle_timeout\":0,\"tz\":\"CST-8\",\"wifi_ssid\":\"Home\",\"wifi_pass_set\":true,"
                "\"ntp_server\":\"cn.pool.ntp.org\"}",
                "to_json pass_set true when pass nonempty");
 

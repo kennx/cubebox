@@ -109,10 +109,17 @@ static bool printable_valid(const char *s, size_t min_len, size_t max_len)
 void config_model_defaults(config_model_t *cfg)
 {
     cfg->brightness = 100;
+    cfg->idle_timeout = 30;
     strcpy(cfg->tz, "CST-8");
     cfg->wifi_ssid[0] = '\0';
     cfg->wifi_pass[0] = '\0';
     strcpy(cfg->ntp_server, "ntp.aliyun.com");
+}
+
+/* idle_timeout 合法值白名单（秒；0=永不）——网页选项与固件状态机共用语义 */
+static bool idle_timeout_valid(long long v)
+{
+    return v == 0 || v == 30 || v == 60 || v == 300 || v == 600;
 }
 
 static bool is_string_key(const char *key)
@@ -121,9 +128,14 @@ static bool is_string_key(const char *key)
            || strcmp(key, "ntp_server") == 0;
 }
 
+static bool is_number_key(const char *key)
+{
+    return strcmp(key, "brightness") == 0 || strcmp(key, "idle_timeout") == 0;
+}
+
 bool config_model_key_type(const char *key, config_model_type_t *out)
 {
-    if (strcmp(key, "brightness") == 0) {
+    if (is_number_key(key)) {
         *out = CFG_TYPE_NUMBER;
         return true;
     }
@@ -145,6 +157,17 @@ bool config_model_set_number(config_model_t *cfg, const char *key, double value)
             return false;
         }
         cfg->brightness = (uint8_t)v;
+        return true;
+    }
+    if (strcmp(key, "idle_timeout") == 0) {
+        if (value != (double)(long long)value) {
+            return false; /* 非整数（含 NaN） */
+        }
+        long long v = (long long)value;
+        if (!idle_timeout_valid(v)) {
+            return false;
+        }
+        cfg->idle_timeout = (uint16_t)v;
         return true;
     }
     if (is_string_key(key)) {
@@ -186,7 +209,7 @@ bool config_model_set_string(config_model_t *cfg, const char *key, const char *v
         snprintf(cfg->ntp_server, sizeof(cfg->ntp_server), "%s", value);
         return true;
     }
-    if (strcmp(key, "brightness") == 0) {
+    if (is_number_key(key)) {
         return false; /* 已知 key 但类型不匹配（SETCFG {"brightness":"40"} 整体拒绝） */
     }
     return true; /* 未知 key 忽略 */
@@ -249,6 +272,9 @@ void config_model_to_json(const config_model_t *cfg, char *buf, size_t len)
 
     append_str(buf, len, &pos, "{\"brightness\":");
     snprintf(num, sizeof(num), "%u", cfg->brightness);
+    append_str(buf, len, &pos, num);
+    append_str(buf, len, &pos, ",\"idle_timeout\":");
+    snprintf(num, sizeof(num), "%u", cfg->idle_timeout);
     append_str(buf, len, &pos, num);
     append_str(buf, len, &pos, ",\"tz\":\"");
     append_escaped(buf, len, &pos, cfg->tz);
