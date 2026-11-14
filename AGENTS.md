@@ -23,6 +23,7 @@ main/
 ├── config_store.*    # 配置存储与应用：NVS 持久化 + SETCFG 解析 + 副作用 defer 到 gui_task
 ├── time_sync.*       # 时间同步协调：RTC 开机恢复系统时间 + SNTP 配置 + 同步后写回 RTC
 ├── low_power.*       # 低功耗状态机（纯逻辑，主机可测）：无操作超时降亮度回时钟，触摸/KEY/WAKE 唤醒；动作由 gui_task 胶水执行
+├── alarm.*           # 闹钟纯逻辑（主机可测）：触发判定（模式/星期位/分钟去重）+ 渐入包络；响铃状态机与动作在 main.c 胶水
 ├── hal/              # 硬件抽象层（HAL）
 │   ├── hal.h         # 聚合入口，上层统一从这里引入
 │   ├── hal_power.*   # AXP2101 电源管理（ALDO3 屏复位）
@@ -31,6 +32,7 @@ main/
 │   ├── hal_button.*  # KEY 用户按键（GPIO10 内部上拉、低有效，轮询接口）
 │   ├── hal_imu.*     # QMI8658 加速度计低频姿态读取（gui_task 上下文）
 │   ├── hal_orientation.* # 四方向判定纯逻辑：倾斜保持 + 连续 3 次确认（主机可测）
+│   ├── hal_audio.*   # ES8311 音频输出（esp_codec_dev 框架，共享 I2C 总线）：闹钟铃音实时合成播放，链路懒建懒拆省电
 │   └── hal_display.* # SH8601 QSPI 面板 + LVGL 驱动/四方向软件旋转 + 截图 + 背光
 └── apps/             # 应用层
     ├── apps.{c,h}    # 应用框架：注册表 + 生命周期状态机（主机可测纯 C）
@@ -39,6 +41,7 @@ main/
     │   └── swipe_nav/   # 左右滑动手势导航（循环切换，走 apps_request_open）
     ├── app_clock/    # 点阵数字时钟（默认第一屏，含 view/ 子目录）
     ├── app_test/     # 点阵「OK」框架验证屏（含 view/ 子目录）
+    ├── app_alarm/    # 闹钟响铃屏（瞬态：非响铃误入自动退回时钟，含 view/ 子目录）
     └── app_template/ # 新应用复制模板（不安装，未被引用代码由链接器 GC 剔除）
 tests/                # 主机端单元测试（独立 CMake 工程，ctest）
 web/                  # USB 网页配置器（Vite+React+TS，部署 gh-pages；见 web/README.md）
@@ -46,9 +49,9 @@ docs/apps/            # 每个应用一份说明文档（强制，见"分层架�
 docs/features/        # 功能规格文档（如 web-config.md：USB 配置协议规格）
 ```
 
-- `main/main.c`：app_main 初始化顺序（TF CS 释放、I2C 总线、HAL、hal_rtc/hal_wifi/time_sync、config_store_init、安装应用并请求启动默认应用 clock）、gui_task 主循环（截图请求 → `config_store_apply_pending()` → `hal_imu_service()` → `low_power_service()` → `apps_update()` → `lv_timer_handler`）、USB 调试 console 任务（SNAP/NEXT/REBOOT/WAKE/PING/GETCFG/SETCFG/SCAN/TIME 命令）。应用安装顺序即左右滑动的切换顺序（clock → test，循环）。
-- `main/CMakeLists.txt`：主组件构建配置。`hal/` 与 `apps/` 源码按 GLOB_RECURSE 递归收集——**新增/删除源文件后必须 `idf.py reconfigure`**（GLOB 仅在 configure 时求值，直接 build 不会感知新文件）；落在 main/ 根的源文件（如 config_*.c）不被 GLOB 覆盖，须显式加入 SRCS。
-- `main/idf_component.yml`：IDF 组件管理器清单。当前依赖 `espressif/esp_lcd_sh8601`、`lvgl/lvgl`、`waveshare/esp_lcd_touch_cst9217`、`waveshare/pcf85063a` 与 `waveshare/qmi8658`。
+- `main/main.c`：app_main 初始化顺序（TF CS 释放、I2C 总线、HAL、hal_rtc/hal_wifi/time_sync、config_store_init、安装应用并请求启动默认应用 clock）、gui_task 主循环（截图请求 → `config_store_apply_pending()` → `hal_imu_service()` → `alarm_service()` → `low_power_service()` → `apps_update()` → `lv_timer_handler`）、USB 调试 console 任务（SNAP/NEXT/REBOOT/WAKE/ALARM/PING/GETCFG/SETCFG/SCAN/TIME 命令）。应用安装顺序即左右滑动的切换顺序（clock → test → radius 循环；alarm 为瞬态响铃屏，被滑动误入时自动退回时钟）。
+- `main/CMakeLists.txt`：主组件构建配置。`hal/` 与 `apps/` 源码按 GLOB_RECURSE 递归收集——**新增/删除源文件后必须 `idf.py reconfigure`**（GLOB 仅在 configure 时求值，直接 build 不会感知新文件）；落在 main/ 根的源文件（如 config_*.c、alarm.c）不被 GLOB 覆盖，须显式加入 SRCS。
+- `main/idf_component.yml`：IDF 组件管理器清单。当前依赖 `espressif/esp_lcd_sh8601`、`lvgl/lvgl`、`waveshare/esp_lcd_touch_cst9217`、`waveshare/pcf85063a`、`waveshare/qmi8658` 与 `espressif/esp_codec_dev`（ES8311 音频）。
 - `docs/hardwares/`：硬件规格与参考文档。
 - `docs/firmwares/`：官方固件研究——Waveshare ESP-IDF 示例的目录结构与设备能力清单（蓝牙/BOOT 键官方未实现；触摸方向参数、AXP2101 轨配置等官方事实）。
 - `docs/apps/`：应用说明文档，每个 `app_*` 一份（如 `app_clock.md`）。
@@ -174,6 +177,7 @@ idf.py set-target esp32c6
   - `SNAP` + `tools/screenshot.py -p PORT -o shot.png`：抓取屏幕 PNG（用系统 python 跑，IDF venv 缺 Pillow）。
   - `NEXT`：循环切换到下一个已安装应用（触摸失效时的兜底验证途径）。
   - `WAKE`：注入一次唤醒活动，退出低功耗态（无法远程触摸/按 KEY 时的验证途径）。
+  - `ALARM`：立即强制响铃一次（跳过时间判定，无响应行；闹钟链路（声音/渐入/KEY 停止/响铃屏）的远程验证途径，等真实到点太慢时的兜底）。
   - `REBOOT`：远程重启（抓完整启动日志用）。
   - `SCAN`：阻塞扫描附近未隐藏 AP（~2-4s），回 `#NETWORKS [{ssid,rssi,secure}]`（网页 Wi-Fi 卡片用）。
   - `TIME`：回 `#TIME {synced,utc,local}`（设备时间与 NTP 同步状态，网页时钟页用）。

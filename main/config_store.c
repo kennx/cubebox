@@ -23,6 +23,9 @@
 #define CFG_KEY_SSID   "wifi_ssid"
 #define CFG_KEY_PASS   "wifi_pass"
 #define CFG_KEY_NTP    "ntp_server"
+#define CFG_KEY_ALM_MODE "alarm_mode"
+#define CFG_KEY_ALM_TIME "alarm_time" /* hour*60+min 打包，闹钟时/分原子一体 */
+#define CFG_KEY_ALM_WD   "alarm_wd"
 
 static config_model_t s_cfg;
 /* console_task 置位 / gui_task 清零：单字节 bool 读写天然原子（对照 s_snap_req） */
@@ -55,6 +58,21 @@ void config_store_init(void)
     uint16_t idle_sec = 0;
     if (nvs_get_u16(h, CFG_KEY_IDLE, &idle_sec) == ESP_OK) {
         config_model_set_number(&s_cfg, "idle_timeout", idle_sec);
+    }
+
+    uint8_t alarm_mode = 0;
+    if (nvs_get_u8(h, CFG_KEY_ALM_MODE, &alarm_mode) == ESP_OK) {
+        config_model_set_number(&s_cfg, "alarm_mode", alarm_mode);
+    }
+    uint16_t alarm_time = 0;
+    if (nvs_get_u16(h, CFG_KEY_ALM_TIME, &alarm_time) == ESP_OK) {
+        /* hour*60+min 打包存储；字段独立经 model 验证，越界脏值被拒保默认 */
+        config_model_set_number(&s_cfg, "alarm_hour", alarm_time / 60);
+        config_model_set_number(&s_cfg, "alarm_min", alarm_time % 60);
+    }
+    uint8_t alarm_wd = 0;
+    if (nvs_get_u8(h, CFG_KEY_ALM_WD, &alarm_wd) == ESP_OK) {
+        config_model_set_number(&s_cfg, "alarm_weekdays", alarm_wd);
     }
 
     char buf[sizeof(s_cfg.wifi_pass)]; /* 各字符串字段均 <= 本尺寸 */
@@ -137,6 +155,15 @@ bool config_store_set_json(const char *json, char *err, size_t err_len)
         if ((ret = nvs_set_str(h, CFG_KEY_NTP, tmp.ntp_server)) != ESP_OK) {
             break;
         }
+        if ((ret = nvs_set_u8(h, CFG_KEY_ALM_MODE, tmp.alarm_mode)) != ESP_OK) {
+            break;
+        }
+        if ((ret = nvs_set_u16(h, CFG_KEY_ALM_TIME, tmp.alarm_hour * 60u + tmp.alarm_min)) != ESP_OK) {
+            break;
+        }
+        if ((ret = nvs_set_u8(h, CFG_KEY_ALM_WD, tmp.alarm_weekdays)) != ESP_OK) {
+            break;
+        }
         ret = nvs_commit(h);
     } while (0);
     nvs_close(h);
@@ -179,4 +206,32 @@ uint16_t config_store_get_idle_timeout(void)
 uint8_t config_store_get_brightness(void)
 {
     return s_cfg.brightness;
+}
+
+void config_store_get_alarm(alarm_cfg_t *out)
+{
+    out->mode = s_cfg.alarm_mode;
+    out->hour = s_cfg.alarm_hour;
+    out->minute = s_cfg.alarm_min;
+    out->weekdays = s_cfg.alarm_weekdays;
+}
+
+void config_store_disable_alarm(void)
+{
+    s_cfg.alarm_mode = ALARM_MODE_OFF;
+
+    nvs_handle_t h;
+    if (nvs_open(CFG_NVS_NS, NVS_READWRITE, &h) != ESP_OK) {
+        ESP_LOGE(TAG, "alarm disable: nvs open failed (mode=0 in RAM only)");
+        return;
+    }
+    esp_err_t ret = nvs_set_u8(h, CFG_KEY_ALM_MODE, ALARM_MODE_OFF);
+    if (ret == ESP_OK) {
+        ret = nvs_commit(h);
+    }
+    nvs_close(h);
+    if (ret != ESP_OK) {
+        /* 内存态已关（本次运行不重复响）；仅掉电重启后可能再响一次 */
+        ESP_LOGE(TAG, "alarm disable: nvs write %s", esp_err_to_name(ret));
+    }
 }

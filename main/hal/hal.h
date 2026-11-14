@@ -11,3 +11,4 @@
 #include "hal/hal_button.h"
 #include "hal/hal_imu.h"
 #include "hal/hal_orientation.h"
+#include "hal/hal_audio.h"

@@ -18,6 +18,10 @@ export interface DeviceConfig {
   wifi_ssid: string;
   wifi_pass_set: boolean;
   ntp_server: string;
+  alarm_mode?: number; // 闹钟模式 0=关 1=单次 2=每周 3=每天；旧固件（proto<4）无闹钟字段
+  alarm_hour?: number; // 0-23
+  alarm_min?: number; // 0-59
+  alarm_weekdays?: number; // 位掩码 bit0=周一 … bit6=周日（每周模式生效）
 }
 
 export interface ConfigPatch {
@@ -27,6 +31,10 @@ export interface ConfigPatch {
   wifi_ssid?: string;
   wifi_pass?: string;
   ntp_server?: string;
+  alarm_mode?: number;
+  alarm_hour?: number;
+  alarm_min?: number;
+  alarm_weekdays?: number;
 }
 
 /** SCAN 结果条目（按信号强度降序，未隐藏 AP） */
@@ -322,6 +330,10 @@ const MOCK_DEFAULTS: MockState = {
   wifi_ssid: "",
   wifi_pass: "",
   ntp_server: "ntp.aliyun.com",
+  alarm_mode: 0,
+  alarm_hour: 7,
+  alarm_min: 0,
+  alarm_weekdays: 127,
 };
 
 /** 与固件 config_model 一致的白名单（秒；0=永不） */
@@ -353,6 +365,22 @@ function mockValidate(patch: ConfigPatch): void {
   if (patch.ntp_server !== undefined) {
     if (!/^[A-Za-z0-9.:-]{1,63}$/.test(patch.ntp_server)) throw new Error("bad field: ntp_server");
   }
+  if (patch.alarm_mode !== undefined) {
+    if (!Number.isInteger(patch.alarm_mode) || patch.alarm_mode < 0 || patch.alarm_mode > 3)
+      throw new Error("bad field: alarm_mode");
+  }
+  if (patch.alarm_hour !== undefined) {
+    if (!Number.isInteger(patch.alarm_hour) || patch.alarm_hour < 0 || patch.alarm_hour > 23)
+      throw new Error("bad field: alarm_hour");
+  }
+  if (patch.alarm_min !== undefined) {
+    if (!Number.isInteger(patch.alarm_min) || patch.alarm_min < 0 || patch.alarm_min > 59)
+      throw new Error("bad field: alarm_min");
+  }
+  if (patch.alarm_weekdays !== undefined) {
+    if (!Number.isInteger(patch.alarm_weekdays) || patch.alarm_weekdays < 0 || patch.alarm_weekdays > 127)
+      throw new Error("bad field: alarm_weekdays");
+  }
 }
 
 class MockDevice implements Device {
@@ -366,7 +394,7 @@ class MockDevice implements Device {
   async connect(): Promise<DeviceInfo> {
     await sleep(MOCK_DELAY_MS);
     this.connected = true;
-    return { name: "CubeBox", fw: "0.3.0-mock", proto: 3 };
+    return { name: "CubeBox", fw: "0.3.0-mock", proto: 4 };
   }
 
   async disconnect(): Promise<void> {
@@ -384,6 +412,10 @@ class MockDevice implements Device {
       wifi_ssid: s.wifi_ssid,
       wifi_pass_set: s.wifi_pass !== "",
       ntp_server: s.ntp_server,
+      alarm_mode: s.alarm_mode,
+      alarm_hour: s.alarm_hour,
+      alarm_min: s.alarm_min,
+      alarm_weekdays: s.alarm_weekdays,
     };
   }
 
@@ -400,6 +432,10 @@ class MockDevice implements Device {
       wifi_ssid: s.wifi_ssid,
       wifi_pass_set: s.wifi_pass !== "",
       ntp_server: s.ntp_server,
+      alarm_mode: s.alarm_mode,
+      alarm_hour: s.alarm_hour,
+      alarm_min: s.alarm_min,
+      alarm_weekdays: s.alarm_weekdays,
     };
   }
 

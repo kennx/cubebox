@@ -114,12 +114,30 @@ void config_model_defaults(config_model_t *cfg)
     cfg->wifi_ssid[0] = '\0';
     cfg->wifi_pass[0] = '\0';
     strcpy(cfg->ntp_server, "ntp.aliyun.com");
+    cfg->alarm_mode = 0;
+    cfg->alarm_hour = 7;
+    cfg->alarm_min = 0;
+    cfg->alarm_weekdays = 127;
 }
 
 /* idle_timeout 合法值白名单（秒；0=永不）——网页选项与固件状态机共用语义 */
 static bool idle_timeout_valid(long long v)
 {
     return v == 0 || v == 30 || v == 60 || v == 300 || v == 600;
+}
+
+/* 数值字段公共路径：整数且在 [lo,hi] 才写入（失败不改动） */
+static bool set_u8_bounded(uint8_t *field, double value, long long lo, long long hi)
+{
+    if (value != (double)(long long)value) {
+        return false; /* 非整数（含 NaN） */
+    }
+    long long v = (long long)value;
+    if (v < lo || v > hi) {
+        return false;
+    }
+    *field = (uint8_t)v;
+    return true;
 }
 
 static bool is_string_key(const char *key)
@@ -130,7 +148,9 @@ static bool is_string_key(const char *key)
 
 static bool is_number_key(const char *key)
 {
-    return strcmp(key, "brightness") == 0 || strcmp(key, "idle_timeout") == 0;
+    return strcmp(key, "brightness") == 0 || strcmp(key, "idle_timeout") == 0
+           || strcmp(key, "alarm_mode") == 0 || strcmp(key, "alarm_hour") == 0
+           || strcmp(key, "alarm_min") == 0 || strcmp(key, "alarm_weekdays") == 0;
 }
 
 bool config_model_key_type(const char *key, config_model_type_t *out)
@@ -169,6 +189,18 @@ bool config_model_set_number(config_model_t *cfg, const char *key, double value)
         }
         cfg->idle_timeout = (uint16_t)v;
         return true;
+    }
+    if (strcmp(key, "alarm_mode") == 0) {
+        return set_u8_bounded(&cfg->alarm_mode, value, 0, 3);
+    }
+    if (strcmp(key, "alarm_hour") == 0) {
+        return set_u8_bounded(&cfg->alarm_hour, value, 0, 23);
+    }
+    if (strcmp(key, "alarm_min") == 0) {
+        return set_u8_bounded(&cfg->alarm_min, value, 0, 59);
+    }
+    if (strcmp(key, "alarm_weekdays") == 0) {
+        return set_u8_bounded(&cfg->alarm_weekdays, value, 0, 127);
     }
     if (is_string_key(key)) {
         return false; /* 已知 key 但类型不匹配（SETCFG {"tz":9} 整体拒绝） */
@@ -284,6 +316,18 @@ void config_model_to_json(const config_model_t *cfg, char *buf, size_t len)
     append_str(buf, len, &pos, cfg->wifi_pass[0] != '\0' ? "true" : "false");
     append_str(buf, len, &pos, ",\"ntp_server\":\"");
     append_escaped(buf, len, &pos, cfg->ntp_server);
-    append_str(buf, len, &pos, "\"}");
+    append_str(buf, len, &pos, "\",\"alarm_mode\":");
+    snprintf(num, sizeof(num), "%u", cfg->alarm_mode);
+    append_str(buf, len, &pos, num);
+    append_str(buf, len, &pos, ",\"alarm_hour\":");
+    snprintf(num, sizeof(num), "%u", cfg->alarm_hour);
+    append_str(buf, len, &pos, num);
+    append_str(buf, len, &pos, ",\"alarm_min\":");
+    snprintf(num, sizeof(num), "%u", cfg->alarm_min);
+    append_str(buf, len, &pos, num);
+    append_str(buf, len, &pos, ",\"alarm_weekdays\":");
+    snprintf(num, sizeof(num), "%u", cfg->alarm_weekdays);
+    append_str(buf, len, &pos, num);
+    append_str(buf, len, &pos, "}");
     buf[pos] = '\0';
 }
