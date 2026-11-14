@@ -9,7 +9,7 @@ typedef struct {
     lv_obj_t *prev_screen; /* 打开前的活动屏幕，销毁时切回 */
 } view_test_t;
 
-/* 构建界面（点阵屏居中「OK」）并加载自己的屏幕；失败返回 NULL */
+/* 构建界面（A-Z 字体测试卡，放不下丢弃尾部字母）并加载自己的屏幕；失败返回 NULL */
 view_test_t *view_test_create(void);
 
 /* 切回 prev_screen 后销毁本应用屏幕与状态；view 可为 NULL */
