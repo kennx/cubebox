@@ -4,6 +4,8 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "alarm.h"
+
 /*
  * 配置存储与应用：NVS 持久化 + SETCFG 解析（cJSON）+ 副作用应用。
  * 字段验证与 JSON 拼装见 config_model；本模块依赖 IDF（NVS/cJSON）与 HAL。
@@ -34,3 +36,10 @@ uint16_t config_store_get_idle_timeout(void);
 
 /** 当前配置亮度 0-100；低功耗唤醒时恢复用 */
 uint8_t config_store_get_brightness(void);
+
+/** 当前闹钟配置快照（alarm 调度每秒读取，SETCFG 即时生效） */
+void config_store_get_alarm(alarm_cfg_t *out);
+
+/** 单次闹钟触发后立即持久化关闭（gui_task 上下文，先落盘再响铃规避
+ *  响铃中断/重启导致次日重复响）；NVS 写失败仅告警——内存态仍关闭。 */
+void config_store_disable_alarm(void);

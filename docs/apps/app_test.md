@@ -3,8 +3,10 @@
 > 路径:`main/apps/app_test/` · 应用名:`test`
 
 框架验证屏（第二屏）：23×23 点阵背景与 app_clock 同款（#050505/#151515/白），
-中间居中点阵字母「OK」（3×5 字模，7 列宽）。验证 hal(电源→显示→触摸) +
-apps 框架 + common 组件（dotmatrix/swipe_nav）全链路。
+**A-Z 字体测试卡铺满屏**：3×5 字模每行 6 字符（列 0,4,…,20 恰占满 23 列）、
+4 行（行 0,6,12,18 恰占满 23 行）= 24 格；字母 26 个放不下，只写前 24 个
+（A-X，6×4 网格），Y/Z 丢弃、若有空格则留空（约定见 view_test.c 注释）。
+验证 hal(电源→显示→触摸) + apps 框架 + common 组件（dotmatrix/swipe_nav）全链路。
 
 ## 生命周期
 
@@ -36,5 +38,5 @@ app_test/
 ## 验证
 
 - 主机端:`ctest`（点阵字体/布局，见 `tests/test_dotmatrix.c`）
-- 上机：右滑（或 `NEXT` 命令）从时钟切至此屏显示点阵「OK」；`SNAP` +
+- 上机：右滑（或 `NEXT` 命令）从时钟切至此屏显示 A-X 字体测试卡；`SNAP` +
   `tools/screenshot.py` 抓图比对

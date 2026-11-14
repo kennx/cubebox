@@ -9,14 +9,17 @@ React 单页应用（`web/`，部署于 [gh-pages](https://kennx.github.io/cubeb
 1. Chrome / Edge 打开配置页（Web Serial 仅 Chromium 系支持，且需 HTTPS——Pages 满足）。
 2. USB 连接设备，点「授权并连接」→ 浏览器弹出设备选择（过滤 Espressif VID `0x303A`）→ 授权。
 3. 配对成功进入「通用配置」：Wi-Fi 凭据（可扫描附近网络选择）/ 屏幕亮度 / 自动低功耗 / 时区，保存即生效并持久化（断电保持）。
-4. 侧栏「时钟」页：NTP 服务器配置 + 设备当前时间与同步状态展示。
+4. 侧栏「时钟」页：闹钟（模式/时间/星期）+ NTP 服务器配置 + 设备当前时间与同步状态展示。
 
-## 协议规格（proto 3）
+## 协议规格（proto 4）
 
 proto 2 在 proto 1 基础上新增 `ntp_server` 配置字段与 `SCAN` / `TIME` 命令
 （Wi-Fi 连接、NTP 校时与 RTC 写入见 `docs/features/ntp-time-sync.md`）。
 proto 3 在 proto 2 基础上新增 `idle_timeout` 配置字段与 `WAKE` 命令
 （低功耗模式：无操作超时降亮度回时钟、触摸/KEY/WAKE 唤醒）。
+proto 4 在 proto 3 基础上新增闹钟配置字段 `alarm_mode` / `alarm_hour` /
+`alarm_min` / `alarm_weekdays`（到点响铃 3 分钟、声音渐入至最大音量、按
+KEY 停止；设计见 `docs/superpowers/specs/2026-11-14-alarm-design.md`）。
 
 传输层：UTF-8 行文本，`\n` 结尾，115200 baud。与 ESP_LOG、SNAP 截图流共用同一串口通道——
 **协议响应行以 `#` 前缀标识**，其余行一律视为日志噪声丢弃。
@@ -35,8 +38,8 @@ proto 3 在 proto 2 基础上新增 `idle_timeout` 配置字段与 `WAKE` 命令
 ### 设备 → 网页
 
 ```
-#HELLO    {"name":"CubeBox","fw":"0.3.0","proto":3}       ← PING 的响应
-#CFG      {"brightness":40,"idle_timeout":30,"tz":"CST-8","wifi_ssid":"Home","wifi_pass_set":true,"ntp_server":"ntp.aliyun.com"}
+#HELLO    {"name":"CubeBox","fw":"0.3.0","proto":4}       ← PING 的响应
+#CFG      {"brightness":40,"idle_timeout":30,"tz":"CST-8","wifi_ssid":"Home","wifi_pass_set":true,"ntp_server":"ntp.aliyun.com","alarm_mode":2,"alarm_hour":7,"alarm_min":30,"alarm_weekdays":31}
 #NETWORKS [{"ssid":"Home_5G","rssi":-46,"secure":true}]   ← SCAN 的响应（按信号强度降序，≤16 条）
 #TIME     {"synced":true,"utc":1762848000,"local":"2026-11-11 12:00:00"}  ← TIME 的响应
 #ERR      <原因短语>                                      ← SETCFG 验证/解析/NVS 失败，或 SCAN 忙
@@ -59,6 +62,10 @@ proto 3 在 proto 2 基础上新增 `idle_timeout` 配置字段与 `WAKE` 命令
 | `wifi_ssid` | 字符串 | 1–32 字节，可打印 ASCII（0x20–0x7E）或合法 UTF-8 序列（中文 SSID 支持；字节计长与 esp_wifi 缓冲一致） |
 | `wifi_pass` | 字符串 | 0–64 字节，同上；空串 = 清除已存密码 |
 | `ntp_server` | 字符串 | 1–63 字节，白名单 `A-Za-z0-9 . : -`（域名 / IPv4 / IPv6），默认 `ntp.aliyun.com` |
+| `alarm_mode` | 整数 | 0–3：0=关闭（默认，任何时刻不响）、1=单次（下一个该时刻响一次，触发后固件自动持久化回 0）、2=每周（仅 `alarm_weekdays` 选中的星期响）、3=每天 |
+| `alarm_hour` | 整数 | 0–23，默认 7 |
+| `alarm_min` | 整数 | 0–59，默认 0 |
+| `alarm_weekdays` | 整数 | 0–127 位掩码：bit0=周一 … bit6=周日，默认 127（全选；仅每周模式生效，0=合法但任何天都不响，网页端约束至少一天） |
 
 未知 key 忽略（向前兼容：新版网页发旧固件不认识的字段不报错）；**已知 key 的 JSON
 类型不匹配（如 `{"brightness":"40"}`）整体拒绝**，回 `#ERR bad field: <key>`。
@@ -66,6 +73,9 @@ proto 3 在 proto 2 基础上新增 `idle_timeout` 配置字段与 `WAKE` 命令
 ### 语义与行为细节
 
 - **部分更新**：`SETCFG {"brightness":40}` 只改亮度，其余保持。
+- **闹钟即时生效**：`alarm_*` 字段无副作用 defer——gui_task 的闹钟调度每秒
+  直接读当前配置，SETCFG 成功后的下一秒即按新闹钟判定（单次闹钟触发时由
+  固件写回 `alarm_mode:0`，随后 GETCFG 可见）。
 - **原子性**：任一字段验证失败 → 整体拒绝（`#ERR bad field: <key>`），NVS 不写、内存态不变。
 - **副作用延迟生效 ≤10ms**：SETCFG 在 console 任务只做「验证 → NVS commit → 置 pending」，
   gui_task 每轮消费 pending 执行亮度（SPI 并发安全）、时区（`setenv/tzset`，时钟立即跟随）、
