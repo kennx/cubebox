@@ -53,6 +53,7 @@ static volatile bool s_playing;            /* 播放任务存活标志（stop �
 
 static const audio_codec_ctrl_if_t *s_ctrl_if; /* I2C 控制（共享总线上挂 ES8311 设备） */
 static const audio_codec_gpio_if_t *s_gpio_if;
+static const audio_codec_if_t *s_codec_if; /* ES8311 接口（每次建链新建，拆链释放） */
 static esp_codec_dev_handle_t s_codec;
 static i2s_chan_handle_t s_tx_chan;
 static const audio_codec_data_if_t *s_data_if;
@@ -78,7 +79,7 @@ static void synth_chunk(int16_t *out, uint32_t pattern_pos_ms, uint32_t elapsed_
     }
 }
 
-/* 整链拆除（建链的对偶序）：codec 关闭/删除 → data_if → I2S 通道。
+/* 整链拆除（建链的对偶序）：codec 关闭/删除 → codec_if → data_if → I2S 通道。
  * 播放任务与建链失败路径共用。 */
 static void audio_chain_teardown(void)
 {
@@ -86,6 +87,10 @@ static void audio_chain_teardown(void)
         esp_codec_dev_close(s_codec);
         esp_codec_dev_delete(s_codec);
         s_codec = NULL;
+    }
+    if (s_codec_if != NULL) {
+        audio_codec_delete_codec_if(s_codec_if);
+        s_codec_if = NULL;
     }
     if (s_data_if != NULL) {
         audio_codec_delete_data_if(s_data_if);
@@ -168,11 +173,12 @@ static bool audio_chain_build(void)
     if (codec_if == NULL) {
         goto fail;
     }
+    s_codec_if = codec_if;
 
     stage = "esp_codec_dev_new";
     esp_codec_dev_cfg_t dev_cfg = {
         .dev_type = ESP_CODEC_DEV_TYPE_OUT,
-        .codec_if = codec_if,
+        .codec_if = s_codec_if,
         .data_if = s_data_if,
     };
     s_codec = esp_codec_dev_new(&dev_cfg);
@@ -264,9 +270,18 @@ void hal_audio_alarm_stop(void)
         return; /* 幂等 */
     }
     s_stop_req = true;
-    /* 等播放任务排空当前块并整链拆除（≤ 一个 20ms 块 + 拆链开销） */
+    /* 等播放任务排空当前块并整链拆除（≤ 一个 20ms 块 + 拆链开销）。
+     * 必须 vTaskDelay(1) 真阻塞：pdMS_TO_TICKS(<10ms) 在 100Hz tick 下截断为 0
+     * → vTaskDelay(0)=taskYIELD 不阻塞，gui_task(优先级5) 会饿死更低优先级的
+     * 播放任务(4)，死锁并触发 IDLE 看门狗（实测教训，见 plans/2026-11-14-alarm.md） */
+    int wait_ms = 0;
     while (s_playing) {
-        vTaskDelay(pdMS_TO_TICKS(2));
+        vTaskDelay(1);
+        wait_ms += portTICK_PERIOD_MS;
+        if (wait_ms >= 2000) {
+            ESP_LOGE(TAG, "stop: playback task not exiting in 2s, give up waiting");
+            break;
+        }
     }
     ESP_LOGI(TAG, "alarm ringing stop");
 }
