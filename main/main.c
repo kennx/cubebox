@@ -21,8 +21,6 @@
 #include "apps/common/swipe_nav/swipe_nav.h"
 #include "apps/app_clock/app_clock.h"
 #include "apps/app_test/app_test.h"
-#include "apps/app_radius/app_radius.h"
-#include "apps/app_alarm/app_alarm.h"
 
 #define TAG "main"
 
@@ -32,6 +30,10 @@ static volatile bool s_wake_req = false;
 
 /* 闹钟 ALARM 测试请求：console_task 置位 / gui_task 清零（同上） */
 static volatile bool s_alarm_test_req = false;
+
+/* 闹钟 ALARMSTOP 测试请求：console_task 置位 / gui_task 清零（远程停止响铃，
+ * 免去每次验证等满 3 分钟超时；与 KEY 停止走同一停止路径） */
+static volatile bool s_alarm_stop_req = false;
 
 /* I2C */
 #define I2C_SDA_GPIO    8
@@ -44,10 +46,9 @@ static volatile bool s_alarm_test_req = false;
  * 驱动直读，绕开 console 子系统的行缓冲，读取不受日志输出干扰。
  *   SNAP            — 触发一次全屏截图流（配合 tools/screenshot.py）
  *   NEXT            — 循环切换到下一个已安装应用（触摸失效时的兜底验证途径）
- *   RAD <px>        — 设置 app_radius 可调单弧半径（1-240）并切到该页
- *   PAGE <n>        — app_radius 直接跳页 0 白屏/1 刻度/2 可调弧
  *   WAKE            — 注入一次唤醒活动（退出低功耗态；无法远程按 KEY/触摸时的验证途径）
  *   ALARM           — 立即强制响铃一次（跳过时间判定；闹钟链路远程验证途径，无响应行）
+ *   ALARMSTOP       — 远程停止响铃（与 KEY 同一停止路径；验证免去等满 3 分钟，无响应行）
  *   REBOOT          — 远程重启（抓完整启动日志用）
  *   PING            — 配对握手：回 #HELLO {name,fw,proto}（网页配置器用，proto 4）
  *   GETCFG          — 回 #CFG {brightness,idle_timeout,tz,wifi_ssid,wifi_pass_set,ntp_server,
@@ -91,26 +92,12 @@ static void console_task(void *arg)
                 hal_display_snapshot_arm();
             } else if (strcmp(line, "NEXT") == 0) {
                 swipe_nav_step(1); /* 循环切下一个已安装应用（触摸失效时的兜底） */
-            } else if (strncmp(line, "RAD ", 4) == 0) {
-                int r = atoi(line + 4);
-                if (r >= 1 && r <= 240) {
-                    app_radius_request_radius(r); /* gui_task 的 on_running 消费 */
-                    n = snprintf(resp, sizeof(resp), "#RAD %d\n", r);
-                } else {
-                    n = snprintf(resp, sizeof(resp), "#ERR radius 1-240\n");
-                }
-            } else if (strncmp(line, "PAGE ", 5) == 0) {
-                int p = atoi(line + 5);
-                if (p >= 0 && p <= 2) {
-                    app_radius_request_page(p);
-                    n = snprintf(resp, sizeof(resp), "#PAGE %d\n", p);
-                } else {
-                    n = snprintf(resp, sizeof(resp), "#ERR page 0-2\n");
-                }
             } else if (strcmp(line, "WAKE") == 0) {
                 s_wake_req = true; /* gui_task 消费：注入活动退出低功耗（NEXT 式兜底） */
             } else if (strcmp(line, "ALARM") == 0) {
                 s_alarm_test_req = true; /* gui_task 消费：强制响铃（等 3 分钟闹钟的验证兜底） */
+            } else if (strcmp(line, "ALARMSTOP") == 0) {
+                s_alarm_stop_req = true; /* gui_task 消费：停止响铃（KEY 同路径的远程版本） */
             } else if (strcmp(line, "REBOOT") == 0) {
                 esp_restart();
             } else if (strcmp(line, "PING") == 0) {
@@ -159,9 +146,10 @@ static void console_task(void *arg)
 }
 
 /*
- * 闹钟服务（gui_task 上下文）：秒级判定到点 → 起铃（音频+响铃屏+唤醒背光）；
- * KEY 下降沿或 3 分钟超时 → 停铃切回时钟。调度判定纯逻辑见 alarm.c，
- * 音频链路见 hal_audio.c，响铃屏见 app_alarm。
+ * 闹钟服务（gui_task 上下文）：秒级判定到点 → 起铃（音频 + 唤醒背光，
+ * 不切换应用——响铃期间停留当前界面，通常是时钟，用户反馈无需独立响铃屏）；
+ * KEY 下降沿或 3 分钟超时 → 停铃。调度判定纯逻辑见 alarm.c，
+ * 音频链路见 hal_audio.c。
  */
 static alarm_sched_ctx_t s_alarm_sched;
 static bool s_alarm_ringing;          /* 响铃态（含音频链路失败仅亮屏的情况） */
@@ -200,29 +188,27 @@ static void alarm_service(void)
             s_alarm_ringing = true;
             s_alarm_ring_start_us = esp_timer_get_time();
             s_alarm_prev_key = key;
-            hal_audio_alarm_start();     /* 链路失败仅日志：响铃屏照常亮起 */
-            app_alarm_set_ringing(true); /* 必须先于 request_open（on_open 消费） */
-            apps_request_open(app_alarm.name);
+            hal_audio_alarm_start();     /* 链路失败仅日志：屏幕照常走时 */
             lv_disp_trig_activity(NULL); /* 响铃即活动：退出低功耗、阻止响铃中降亮度 */
             ESP_LOGI(TAG, "alarm: ring start");
         }
         s_alarm_prev_key = key;
+        s_alarm_stop_req = false; /* 未响铃时到达的停止请求：忽略 */
         return;
     }
 
-    /* 响铃中：持续注入活动（3 分钟内不被低功耗降亮度），KEY 下降沿/超时停止 */
+    /* 响铃中：持续注入活动（3 分钟内不被低功耗降亮度），KEY 下降沿/远程请求/超时停止 */
     s_alarm_test_req = false; /* 响铃中到达的测试请求：忽略 */
     lv_disp_trig_activity(NULL);
-    bool stop = (key && !s_alarm_prev_key)
+    bool stop = (key && !s_alarm_prev_key) || s_alarm_stop_req
                 || (uint32_t)((esp_timer_get_time() - s_alarm_ring_start_us) / 1000) >= ALARM_RING_MS;
     s_alarm_prev_key = key;
     if (stop) {
         s_alarm_ringing = false;
         hal_audio_alarm_stop();
-        app_alarm_set_ringing(false);
-        apps_request_open(app_clock.name);
         ESP_LOGI(TAG, "alarm: ring stop");
     }
+    s_alarm_stop_req = false; /* 本轮已消费（或未响铃时到达）：清零 */
 }
 
 /*
@@ -271,7 +257,7 @@ static void low_power_service(bool config_applied)
  *   1. 截图请求 → 强制全屏 invalidate（flush_cb 流出全部条带）
  *   2. config_store_apply_pending：消费配置副作用（亮度/tz/Wi-Fi/NTP，console 置位）
  *   3. hal_imu_service：低频读取姿态，稳定换向后旋转显示与触摸
- *   4. alarm_service：闹钟秒级判定与响铃状态机（起停音频/切 app/保持清醒）
+ *   4. alarm_service：闹钟秒级判定与响铃状态机（起停音频/保持清醒，不切换应用）
  *   5. low_power_service：推进低功耗状态机（切 app 请求与背光动作都在本上下文）
  *   6. apps_update：消费跨任务的应用切换请求 + 调当前应用 on_running
  *   7. lv_timer_handler 驱动 LVGL 刷新
@@ -347,19 +333,12 @@ void app_main(void)
     hal_wifi_init();
     time_sync_init();
 
-    /* 安装应用（安装顺序即左右滑动的切换顺序），默认启动点阵时钟。
-     * app_alarm 是瞬态响铃屏：被滑动误入时 on_open 自动退回时钟（见 app_alarm.c） */
+    /* 安装应用（安装顺序即左右滑动的切换顺序），默认启动点阵时钟 */
     if (!apps_install(&app_clock)) {
         ESP_LOGE(TAG, "apps_install(app_clock) failed (table full or duplicate)");
     }
     if (!apps_install(&app_test)) {
         ESP_LOGE(TAG, "apps_install(app_test) failed (table full or duplicate)");
-    }
-    if (!apps_install(&app_radius)) { /* 圆角测量研究工具（docs/apps/app_radius.md） */
-        ESP_LOGE(TAG, "apps_install(app_radius) failed (table full or duplicate)");
-    }
-    if (!apps_install(&app_alarm)) { /* 闹钟响铃屏（docs/apps/app_alarm.md） */
-        ESP_LOGE(TAG, "apps_install(app_alarm) failed (table full or duplicate)");
     }
     apps_request_open(app_clock.name);
 
