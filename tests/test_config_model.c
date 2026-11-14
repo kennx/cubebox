@@ -45,6 +45,50 @@ int main(void)
     expect_str(cfg.wifi_ssid, "", "default ssid empty");
     expect_str(cfg.wifi_pass, "", "default pass empty");
     expect_str(cfg.ntp_server, "ntp.aliyun.com", "default ntp_server");
+    expect(cfg.alarm_mode == 0, "default alarm_mode off");
+    expect(cfg.alarm_hour == 7, "default alarm_hour 7");
+    expect(cfg.alarm_min == 0, "default alarm_min 0");
+    expect(cfg.alarm_weekdays == 127, "default alarm_weekdays all");
+
+    /* ---- set_number: alarm_mode（0=关 1=单次 2=每周 3=每天） ---- */
+    expect(config_model_set_number(&cfg, "alarm_mode", 0) == true, "alarm_mode 0 accepted");
+    expect(cfg.alarm_mode == 0, "alarm_mode 0 stored");
+    expect(config_model_set_number(&cfg, "alarm_mode", 1) == true, "alarm_mode 1 accepted");
+    expect(cfg.alarm_mode == 1, "alarm_mode 1 stored");
+    expect(config_model_set_number(&cfg, "alarm_mode", 2) == true, "alarm_mode 2 accepted");
+    expect(cfg.alarm_mode == 2, "alarm_mode 2 stored");
+    expect(config_model_set_number(&cfg, "alarm_mode", 3) == true, "alarm_mode 3 accepted");
+    expect(cfg.alarm_mode == 3, "alarm_mode 3 stored");
+    expect(config_model_set_number(&cfg, "alarm_mode", 4) == false, "alarm_mode 4 rejected");
+    expect(config_model_set_number(&cfg, "alarm_mode", -1) == false, "alarm_mode -1 rejected");
+    expect(config_model_set_number(&cfg, "alarm_mode", 1.5) == false, "alarm_mode 1.5 rejected");
+    expect(cfg.alarm_mode == 3, "alarm_mode unchanged after rejects");
+
+    /* ---- set_number: alarm_hour / alarm_min（0-23 / 0-59） ---- */
+    expect(config_model_set_number(&cfg, "alarm_hour", 0) == true, "alarm_hour 0 accepted");
+    expect(cfg.alarm_hour == 0, "alarm_hour 0 stored");
+    expect(config_model_set_number(&cfg, "alarm_hour", 23) == true, "alarm_hour 23 accepted");
+    expect(cfg.alarm_hour == 23, "alarm_hour 23 stored");
+    expect(config_model_set_number(&cfg, "alarm_hour", 24) == false, "alarm_hour 24 rejected");
+    expect(config_model_set_number(&cfg, "alarm_hour", -1) == false, "alarm_hour -1 rejected");
+    expect(config_model_set_number(&cfg, "alarm_hour", 7.5) == false, "alarm_hour 7.5 rejected");
+    expect(cfg.alarm_hour == 23, "alarm_hour unchanged after rejects");
+    expect(config_model_set_number(&cfg, "alarm_min", 0) == true, "alarm_min 0 accepted");
+    expect(config_model_set_number(&cfg, "alarm_min", 59) == true, "alarm_min 59 accepted");
+    expect(cfg.alarm_min == 59, "alarm_min 59 stored");
+    expect(config_model_set_number(&cfg, "alarm_min", 60) == false, "alarm_min 60 rejected");
+    expect(config_model_set_number(&cfg, "alarm_min", -5) == false, "alarm_min -5 rejected");
+    expect(cfg.alarm_min == 59, "alarm_min unchanged after rejects");
+
+    /* ---- set_number: alarm_weekdays（位掩码 0-127，bit0=周一…bit6=周日） ---- */
+    expect(config_model_set_number(&cfg, "alarm_weekdays", 0) == true, "alarm_weekdays 0 accepted");
+    expect(cfg.alarm_weekdays == 0, "alarm_weekdays 0 stored");
+    expect(config_model_set_number(&cfg, "alarm_weekdays", 127) == true, "alarm_weekdays 127 accepted");
+    expect(cfg.alarm_weekdays == 127, "alarm_weekdays 127 stored");
+    expect(config_model_set_number(&cfg, "alarm_weekdays", 128) == false, "alarm_weekdays 128 rejected");
+    expect(config_model_set_number(&cfg, "alarm_weekdays", -1) == false, "alarm_weekdays -1 rejected");
+    expect(config_model_set_number(&cfg, "alarm_weekdays", 42.5) == false, "alarm_weekdays 42.5 rejected");
+    expect(cfg.alarm_weekdays == 127, "alarm_weekdays unchanged after rejects");
 
     /* ---- set_number: brightness ---- */
     expect(config_model_set_number(&cfg, "brightness", 0) == true, "brightness 0 accepted");
@@ -166,6 +210,10 @@ int main(void)
     expect(config_model_set_number(&cfg, "ntp_server", 1) == false, "set_number on ntp_server rejected");
     expect(config_model_set_string(&cfg, "brightness", "40") == false, "set_string on number key rejected");
     expect(config_model_set_string(&cfg, "idle_timeout", "30") == false, "set_string on idle_timeout rejected");
+    expect(config_model_set_string(&cfg, "alarm_mode", "1") == false, "set_string on alarm_mode rejected");
+    expect(config_model_set_string(&cfg, "alarm_hour", "7") == false, "set_string on alarm_hour rejected");
+    expect(config_model_set_string(&cfg, "alarm_min", "0") == false, "set_string on alarm_min rejected");
+    expect(config_model_set_string(&cfg, "alarm_weekdays", "127") == false, "set_string on alarm_weekdays rejected");
     expect(cfg.brightness == 100 && cfg.brightness != 40, "brightness unchanged by type mismatch");
 
     /* ---- 验证失败不改动：tz 拒后仍为上次合法值 ---- */
@@ -179,17 +227,23 @@ int main(void)
     config_model_to_json(&cfg, json, sizeof(json));
     expect_str(json,
                "{\"brightness\":100,\"idle_timeout\":30,\"tz\":\"CST-8\",\"wifi_ssid\":\"\",\"wifi_pass_set\":false,"
-               "\"ntp_server\":\"ntp.aliyun.com\"}",
+               "\"ntp_server\":\"ntp.aliyun.com\",\"alarm_mode\":0,\"alarm_hour\":7,\"alarm_min\":0,"
+               "\"alarm_weekdays\":127}",
                "to_json defaults exact");
 
     config_model_set_string(&cfg, "wifi_ssid", "Home");
     config_model_set_string(&cfg, "wifi_pass", "p");
     config_model_set_string(&cfg, "ntp_server", "cn.pool.ntp.org");
     config_model_set_number(&cfg, "idle_timeout", 0);
+    config_model_set_number(&cfg, "alarm_mode", 2);
+    config_model_set_number(&cfg, "alarm_hour", 6);
+    config_model_set_number(&cfg, "alarm_min", 30);
+    config_model_set_number(&cfg, "alarm_weekdays", 0x25);
     config_model_to_json(&cfg, json, sizeof(json));
     expect_str(json,
                "{\"brightness\":100,\"idle_timeout\":0,\"tz\":\"CST-8\",\"wifi_ssid\":\"Home\",\"wifi_pass_set\":true,"
-               "\"ntp_server\":\"cn.pool.ntp.org\"}",
+               "\"ntp_server\":\"cn.pool.ntp.org\",\"alarm_mode\":2,\"alarm_hour\":6,\"alarm_min\":30,"
+               "\"alarm_weekdays\":37}",
                "to_json pass_set true when pass nonempty");
 
     /* 转义路径：setter 合法写入含引号/反斜杠的 ssid（规格 Review Focus #1 回环要求）；

@@ -501,3 +501,59 @@ input[type="range"] {
     padding: 18px 16px 40px;
   }
 }
+
+/* ---- 闹钟卡片 ---- */
+
+.alarm-grid {
+  display: flex;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.alarm-time {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.alarm-time select {
+  min-width: 72px;
+}
+
+.alarm-colon {
+  font-size: 18px;
+  color: var(--muted);
+}
+
+.weekday-chips {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.wd-chip {
+  width: 40px;
+  height: 36px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--fg);
+  font-size: 14px;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+
+.wd-chip:hover:not(:disabled) {
+  border-color: var(--accent);
+}
+
+.wd-chip.on {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+
+.wd-chip:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}

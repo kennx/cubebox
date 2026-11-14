@@ -28,10 +28,15 @@ view_test_t *view_test_create(void)
         return NULL;
     }
 
-    /* 静态内容一次成图：居中点阵「OK」 */
+    /* 静态内容一次成图：A-Z 铺满屏（字体测试卡）。
+     * 3×5 字形 + 1 间隔 → 每行 6 字符（列 0,4,…,20，恰占满 23 列），
+     * 每行 5 点 + 1 空行 → 4 行（行 0,6,12,18，恰占满 23 行）= 24 格；
+     * 字母 26 个放不下 → 按约定只写前 24 个（A-X），多余格留空 */
     dotmatrix_grid_t grid;
     dotmatrix_clear(&grid);
-    dotmatrix_draw_text_centered(&grid, "OK");
+    for (int i = 0; i < 24; i++) {
+        dotmatrix_draw_char(&grid, (i / 6) * 6, (i % 6) * 4, (char)('A' + i));
+    }
     dotmatrix_widget_set_grid(view->dots, &grid);
 
     swipe_nav_attach(view->screen);

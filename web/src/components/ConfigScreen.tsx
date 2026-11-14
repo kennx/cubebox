@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
-import type { Device, DeviceConfig, DeviceInfo } from "../lib/device";
+import type { ConfigPatch, Device, DeviceConfig, DeviceInfo } from "../lib/device";
+import AlarmCard from "./AlarmCard";
 import BrightnessCard from "./BrightnessCard";
 import IdleTimeoutCard from "./IdleTimeoutCard";
 import TimeCard from "./TimeCard";
@@ -42,6 +43,9 @@ export default function ConfigScreen({ device, info, onDisconnect }: Props) {
   const saveNtp = async (ntpServer: string) => {
     setCfg(await device.setCfg({ ntp_server: ntpServer }));
   };
+  const saveAlarm = async (patch: ConfigPatch) => {
+    setCfg(await device.setCfg(patch));
+  };
 
   return (
     <div className="app">
@@ -76,8 +80,9 @@ export default function ConfigScreen({ device, info, onDisconnect }: Props) {
               <>
                 <div className="panel-head">
                   <h1>时钟</h1>
-                  <p className="muted">NTP 校时与设备当前时间</p>
+                  <p className="muted">闹钟、NTP 校时与设备当前时间</p>
                 </div>
+                <AlarmCard cfg={cfg} onSave={saveAlarm} supported={info.proto >= 4} />
                 <TimeCard device={device} cfg={cfg} onSave={saveNtp} />
               </>
             ) : (

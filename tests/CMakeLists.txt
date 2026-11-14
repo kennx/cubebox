@@ -61,3 +61,14 @@ target_compile_options(test_orientation PRIVATE -Wall -Werror -fsanitize=address
 target_link_options(test_orientation PRIVATE -fsanitize=address,undefined)
 
 add_test(NAME test_orientation COMMAND test_orientation)
+
+add_executable(test_alarm
+    test_alarm.c
+    ../main/alarm.c
+)
+
+target_include_directories(test_alarm PRIVATE ../main)
+target_compile_options(test_alarm PRIVATE -Wall -Werror -fsanitize=address,undefined)
+target_link_options(test_alarm PRIVATE -fsanitize=address,undefined)
+
+add_test(NAME test_alarm COMMAND test_alarm)
