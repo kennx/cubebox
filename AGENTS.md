@@ -176,7 +176,8 @@ idf.py set-target esp32c6
   - `SNAP` + `tools/screenshot.py -p PORT -o shot.png`：抓取屏幕 PNG（用系统 python 跑，IDF venv 缺 Pillow）。
   - `NEXT`：循环切换到下一个已安装应用（触摸失效时的兜底验证途径）。
   - `WAKE`：注入一次唤醒活动，退出低功耗态（无法远程触摸/按 KEY 时的验证途径）。
-  - `ALARM`：立即强制响铃一次（跳过时间判定，无响应行；闹钟链路（声音/渐入/KEY 停止/响铃屏）的远程验证途径，等真实到点太慢时的兜底）。
+  - `ALARM`：立即强制响铃一次（跳过时间判定，无响应行；闹钟链路（PCM 铃声/渐入/KEY 停止）的远程验证途径，等真实到点太慢时的兜底）。
+  - `ALARMSTOP`：远程停止响铃（与 KEY 同一停止路径，无响应行；验证免去等满 3 分钟超时）。
   - `REBOOT`：远程重启（抓完整启动日志用）。
   - `SCAN`：阻塞扫描附近未隐藏 AP（~2-4s），回 `#NETWORKS [{ssid,rssi,secure}]`（网页 Wi-Fi 卡片用）。
   - `TIME`：回 `#TIME {synced,utc,local}`（设备时间与 NTP 同步状态，网页时钟页用）。

@@ -51,7 +51,7 @@ int main(void)
     /* ---- 每天：到点响，同分钟去重，过分钟不响，次日同点再响 ---- */
     cfg.mode = ALARM_MODE_DAILY;
     {
-        time_t t0 = 1763084400; /* 2026-11-14 07:00:00 +08 的 epoch 分钟起点 */
+        time_t t0 = 1763084400; /* 任意合法 epoch（仅作分钟去重键，与 tm 的 HH:MM/wday 无关联） */
         struct tm t = make_tm(7, 0, 6);
         expect(alarm_sched_check(&cfg, &t, t0, &ctx) == true, "daily fires at HH:MM");
         expect(alarm_sched_check(&cfg, &t, t0 + 1, &ctx) == false, "same minute deduped");

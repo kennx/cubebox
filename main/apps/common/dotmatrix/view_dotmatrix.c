@@ -2,8 +2,8 @@
  * 点阵 LVGL v8 自定义 widget：继承 lv_obj_class，DRAW_MAIN 中遍历 529 点、
  * 只画与裁剪区相交的圆（lv_draw_rect radius）。几何对照 example.svg：
  * 圆心 c(i) = 30 + (i*420 + 11)/22。origin 30/半径 7 使全部 529 点避开屏幕
- * 四角圆角遮罩（实测半径 69.3-73.6px，见 docs/apps/app_radius.md：角点
- * (30,30) 距最坏角 73.6px 的圆心 √2·43.6 + 7 = 68.7px，余量 4.9px）。
+ * 四角圆角遮罩（实测半径 69.3-73.6px，由原 app_radius 测量工具标定——该
+ * 应用已移除：角点 (30,30) 距最坏角的圆心 √2·43.6 + 7 = 68.7px，余量 4.9px）。
  */
 #include "apps/common/dotmatrix/view_dotmatrix.h"
 

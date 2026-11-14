@@ -6,9 +6,11 @@
  * 由用户提供的 universfield-digital-alarm-clock MP3 转换：16kHz/单声道/s16le，
  * 峰值归一至约 -1.9dBFS，首尾 8ms 淡化消除循环接缝爆音），前 30s 渐入。
  *
- * 上下文约定：hal_audio_alarm_start/stop 仅 gui_task 调用（对照 hal_display）；
- * 播放任务只做 PCM 取数与 esp_codec_dev_write，停止时自行整链拆除后自删，
- * 使建/拆链都在播放任务单一上下文内完成，与 gui_task 无竞态。
+ * 上下文约定：hal_audio_alarm_start/stop 仅 gui_task 调用（对照 hal_display）。
+ * 建链在 start（gui_task 上下文，同步完成后再创建播放任务）；拆链的归属：
+ * 正常停止由播放任务自行拆除后自删（gui_task 阻塞等待其退出），建链失败/
+ * 任务创建失败/任务卡死 >2s 的兜底则由 gui_task 就地拆除——各路径执行时
+ * 播放任务要么尚未创建、要么已确认退出/被强杀，链路资源无并发访问。
  */
 #include <string.h>
 
@@ -48,6 +50,7 @@ static i2c_master_bus_handle_t s_bus;      /* init 记录的共享总线 */
 static bool s_inited;                      /* init 已调用且 ctrl_if 可用 */
 static volatile bool s_stop_req;           /* gui_task 置位：播放任务看到后拆除自删 */
 static volatile bool s_playing;            /* 播放任务存活标志（stop 等其清零） */
+static TaskHandle_t s_task;                /* 播放任务句柄（任务退出前自清；僵尸恢复用） */
 
 static const audio_codec_ctrl_if_t *s_ctrl_if; /* I2C 控制（共享总线上挂 ES8311 设备） */
 static const audio_codec_gpio_if_t *s_gpio_if;
@@ -118,7 +121,8 @@ static void audio_alarm_task(void *arg)
     }
 
     audio_chain_teardown();
-    s_playing = false; /* 先清存活标志再自删（stop 的等待条件） */
+    s_playing = false; /* 先清存活标志再清句柄再自删（stop 的等待/僵尸恢复条件） */
+    s_task = NULL;
     vTaskDelete(NULL);
 }
 
@@ -225,6 +229,14 @@ void hal_audio_init(i2c_master_bus_handle_t bus)
     s_ctrl_if = audio_codec_new_i2c_ctrl(&i2c_cfg);
     if (s_ctrl_if == NULL || s_gpio_if == NULL) {
         ESP_LOGE(TAG, "init: ctrl/gpio if create failed, audio disabled");
+        if (s_ctrl_if != NULL) {
+            audio_codec_delete_ctrl_if(s_ctrl_if);
+            s_ctrl_if = NULL;
+        }
+        if (s_gpio_if != NULL) {
+            audio_codec_delete_gpio_if(s_gpio_if);
+            s_gpio_if = NULL;
+        }
         return;
     }
     s_inited = true;
@@ -246,9 +258,10 @@ bool hal_audio_alarm_start(void)
 
     s_stop_req = false;
     s_playing = true;
-    if (xTaskCreate(audio_alarm_task, "audio_alarm", 3072, NULL, 4, NULL) != pdPASS) {
+    if (xTaskCreate(audio_alarm_task, "audio_alarm", 3072, NULL, 4, &s_task) != pdPASS) {
         ESP_LOGE(TAG, "start: task create failed");
         s_playing = false;
+        s_task = NULL;
         audio_chain_teardown(); /* 建链已成功而任务未起：就地拆除 */
         return false;
     }
@@ -271,7 +284,16 @@ void hal_audio_alarm_stop(void)
         vTaskDelay(1);
         wait_ms += portTICK_PERIOD_MS;
         if (wait_ms >= 2000) {
-            ESP_LOGE(TAG, "stop: playback task not exiting in 2s, give up waiting");
+            /* 僵尸恢复（code review 落地）：任务卡死在阻塞写（罕见，DMA/总线级
+             * 故障）时强杀并就地拆链。残留 s_playing=true 会让后续 start 幂等
+             * 返回成功而不重建链路——闹钟从此静音直到重启，故障被放大。
+             * vTaskDelete 可能泄漏任务持有的驱动信号量，此时属灾难恢复取舍：
+             * 功能可用性优先。s_playing 仍真 ⇒ 任务未执行退出序列 ⇒ 句柄有效。 */
+            ESP_LOGE(TAG, "stop: playback task stuck >2s, force kill & teardown");
+            vTaskDelete(s_task);
+            s_task = NULL;
+            audio_chain_teardown();
+            s_playing = false;
             break;
         }
     }

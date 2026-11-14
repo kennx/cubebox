@@ -7,6 +7,8 @@
 #include <cJSON.h>
 #include <nvs.h>
 #include <nvs_flash.h>
+#include <freertos/FreeRTOS.h>
+#include <freertos/semphr.h>
 
 #include "config_model.h"
 #include "config_store.h"
@@ -30,9 +32,20 @@
 static config_model_t s_cfg;
 /* console_task 置位 / gui_task 清零：单字节 bool 读写天然原子（对照 s_snap_req） */
 static volatile bool s_apply_pending = false;
+/* s_cfg 写者互斥（code review 落地）：set_json（console_task，整体替换 s_cfg = tmp）
+ * 与 disable_alarm（gui_task，写 alarm_mode）并发时，整体替换会抹掉 disable 的写，
+ * 单次闹钟可能次日重复响——两写者从 NVS 写到内存替换全程持锁串行化。
+ * 读侧（get_alarm/get_json）不加锁：与既有容忍一致（单字节字段原子，多字段极端
+ * 撕裂下一轮自愈）；创建失败仅告警退化为无锁（功能性风险接受）。 */
+static SemaphoreHandle_t s_write_lock;
 
 void config_store_init(void)
 {
+    s_write_lock = xSemaphoreCreateMutex();
+    if (s_write_lock == NULL) {
+        ESP_LOGE(TAG, "write mutex create failed, writers unserialized");
+    }
+
     esp_err_t ret = nvs_flash_init();
     if (ret == ESP_ERR_NVS_NO_FREE_PAGES || ret == ESP_ERR_NVS_NEW_VERSION_FOUND) {
         ESP_LOGW(TAG, "NVS init %s, erasing and re-init", esp_err_to_name(ret));
@@ -108,11 +121,15 @@ bool config_store_set_json(const char *json, char *err, size_t err_len)
     /* 先在副本上验证全部字段：任一失败整体放弃，s_cfg 与 NVS 都不动 */
     config_model_t tmp = s_cfg;
     bool ok = true;
+    bool has_alarm_mode = false; /* 决定锁内是否保留跨任务 disable 的 alarm_mode */
     for (const cJSON *item = root->child; item != NULL; item = item->next) {
         const char *key = item->string ? item->string : "";
         config_model_type_t want;
         if (!config_model_key_type(key, &want)) {
             continue; /* 未知 key 忽略（向前兼容：新版网页发旧固件不认识的字段） */
+        }
+        if (strcmp(key, "alarm_mode") == 0) {
+            has_alarm_mode = true;
         }
         if (want == CFG_TYPE_NUMBER) {
             ok = cJSON_IsNumber(item) && config_model_set_number(&tmp, key, item->valuedouble);
@@ -130,11 +147,24 @@ bool config_store_set_json(const char *json, char *err, size_t err_len)
         return false;
     }
 
+    /* 写者互斥：NVS 写 + 内存整体替换全程持锁（见 s_write_lock 注释）。
+     * tmp 基于锁外快照——disable_alarm（gui_task）若已在此间把 alarm_mode 置 0，
+     * 且本次 JSON 未显式设置该字段，则以锁内最新值覆盖 tmp 再写 NVS/内存，
+     * 避免整体替换抹掉 disable 导致单次闹钟次日重复响。 */
+    if (s_write_lock != NULL) {
+        xSemaphoreTake(s_write_lock, portMAX_DELAY);
+    }
+    if (!has_alarm_mode) {
+        tmp.alarm_mode = s_cfg.alarm_mode;
+    }
+
     esp_err_t ret = ESP_OK;
+    bool result = true;
     nvs_handle_t h;
     if ((ret = nvs_open(CFG_NVS_NS, NVS_READWRITE, &h)) != ESP_OK) {
         snprintf(err, err_len, "nvs open: %s", esp_err_to_name(ret));
-        return false;
+        result = false;
+        goto out;
     }
     do {
         if ((ret = nvs_set_u8(h, CFG_KEY_BRIGHT, tmp.brightness)) != ESP_OK) {
@@ -169,12 +199,18 @@ bool config_store_set_json(const char *json, char *err, size_t err_len)
     nvs_close(h);
     if (ret != ESP_OK) {
         snprintf(err, err_len, "nvs write: %s", esp_err_to_name(ret));
-        return false; /* NVS 失败：内存态不替换（tmp 丢弃） */
+        result = false; /* NVS 失败：内存态不替换（tmp 丢弃） */
+        goto out;
     }
 
     s_cfg = tmp;
     s_apply_pending = true;
-    return true;
+
+out:
+    if (s_write_lock != NULL) {
+        xSemaphoreGive(s_write_lock);
+    }
+    return result;
 }
 
 bool config_store_apply_pending(void)
@@ -218,12 +254,16 @@ void config_store_get_alarm(alarm_cfg_t *out)
 
 void config_store_disable_alarm(void)
 {
+    /* 写者互斥（见 s_write_lock 注释）：与 set_json 的整体替换串行化 */
+    if (s_write_lock != NULL) {
+        xSemaphoreTake(s_write_lock, portMAX_DELAY);
+    }
     s_cfg.alarm_mode = ALARM_MODE_OFF;
 
     nvs_handle_t h;
     if (nvs_open(CFG_NVS_NS, NVS_READWRITE, &h) != ESP_OK) {
         ESP_LOGE(TAG, "alarm disable: nvs open failed (mode=0 in RAM only)");
-        return;
+        goto out;
     }
     esp_err_t ret = nvs_set_u8(h, CFG_KEY_ALM_MODE, ALARM_MODE_OFF);
     if (ret == ESP_OK) {
@@ -233,5 +273,10 @@ void config_store_disable_alarm(void)
     if (ret != ESP_OK) {
         /* 内存态已关（本次运行不重复响）；仅掉电重启后可能再响一次 */
         ESP_LOGE(TAG, "alarm disable: nvs write %s", esp_err_to_name(ret));
+    }
+
+out:
+    if (s_write_lock != NULL) {
+        xSemaphoreGive(s_write_lock);
     }
 }
