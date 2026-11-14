@@ -32,7 +32,7 @@ main/
 │   ├── hal_button.*  # KEY 用户按键（GPIO10 内部上拉、低有效，轮询接口）
 │   ├── hal_imu.*     # QMI8658 加速度计低频姿态读取（gui_task 上下文）
 │   ├── hal_orientation.* # 四方向判定纯逻辑：倾斜保持 + 连续 3 次确认（主机可测）
-│   ├── hal_audio.*   # ES8311 音频输出（esp_codec_dev 框架，共享 I2C 总线）：闹钟铃音实时合成播放，链路懒建懒拆省电
+│   ├── hal_audio.*   # ES8311 音频输出（esp_codec_dev 框架，共享 I2C 总线）：闹钟铃音=内嵌 PCM 循环播放（main/alarm_tone.pcm，EMBED_FILES），链路懒建懒拆省电
 │   └── hal_display.* # SH8601 QSPI 面板 + LVGL 驱动/四方向软件旋转 + 截图 + 背光
 └── apps/             # 应用层
     ├── apps.{c,h}    # 应用框架：注册表 + 生命周期状态机（主机可测纯 C）

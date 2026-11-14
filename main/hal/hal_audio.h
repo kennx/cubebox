@@ -15,8 +15,9 @@ void hal_audio_init(i2c_master_bus_handle_t bus);
 
 /**
  * @brief 开始响铃：懒建 I2S+codec 链路（16k/立体声/16bit）、音量设最大、
- *        起播放任务合成通用闹钟哔哔声（2000Hz 四短哔循环）。
- *        前 30s 增益线性渐入（alarm.h ALARM_FADE_MS / alarm_fade_gain_q8）。
+ *        起播放任务循环播放内嵌铃音（main/alarm_tone.pcm，用户提供 MP3
+ *        转换的 16k 单声道 PCM）。前 30s 增益线性渐入
+ *        （alarm.h ALARM_FADE_MS / alarm_fade_gain_q8）。
  * @return false: 链路不可用（初始化失败/器件缺席/已在响铃中的重复调用除外——重复调用幂等 true）
  * @note 仅 gui_task 上下文调用（对照 hal_display 的 LVGL 上下文约束）
  */

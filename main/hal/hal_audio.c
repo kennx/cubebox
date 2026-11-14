@@ -2,13 +2,14 @@
  * 音频输出 HAL：ES8311（esp_codec_dev 框架，I2C 0x18）+ I2S STD（16k/立体声/16bit）。
  * 链路懒建懒拆——响铃开始才建 I2S 通道与打开 codec，停止即整链拆除：
  * 时钟设备常开运行，I2S MCLK 常开有无谓静态功耗（嵌入式优先）。
- * 声音全部实时合成（256 点正弦 LUT + Q16 相位累积），无音频文件/大缓冲。
+ * 铃声 = 内嵌 PCM 循环播放（main/alarm_tone.pcm，EMBED_FILES 链入固件；
+ * 由用户提供的 universfield-digital-alarm-clock MP3 转换：16kHz/单声道/s16le，
+ * 峰值归一至约 -1.9dBFS，首尾 8ms 淡化消除循环接缝爆音），前 30s 渐入。
  *
  * 上下文约定：hal_audio_alarm_start/stop 仅 gui_task 调用（对照 hal_display）；
- * 播放任务只做合成与 esp_codec_dev_write，停止时自行整链拆除后自删，
+ * 播放任务只做 PCM 取数与 esp_codec_dev_write，停止时自行整链拆除后自删，
  * 使建/拆链都在播放任务单一上下文内完成，与 gui_task 无竞态。
  */
-#include <math.h>
 #include <string.h>
 
 #include <esp_err.h>
@@ -39,12 +40,9 @@
 #define AUD_CHUNK_MS    20                            /* 每块 20ms：写阻塞节拍 */
 #define AUD_CHUNK_FRAMES (AUD_SAMPLE_RATE / 1000 * AUD_CHUNK_MS) /* 320 帧 */
 
-/* 通用闹钟节型：2000Hz 四短哔（100ms 响/100ms 停）+ 800ms 静音，周期 1.6s */
-#define AUD_TONE_FREQ_HZ 2000
-#define AUD_TONE_PERIOD_MS 1600
-
-/* 相位累积器：Q16 定点，一圈 = 256 LUT 点 × 65536 */
-#define AUD_PHASE_ONE_CYCLE (256u * 65536u)
+/* 铃音资源（CMakeLists EMBED_FILES alarm_tone.pcm → 链接器符号） */
+extern const uint8_t _binary_alarm_tone_pcm_start[];
+extern const uint8_t _binary_alarm_tone_pcm_end[];
 
 static i2c_master_bus_handle_t s_bus;      /* init 记录的共享总线 */
 static bool s_inited;                      /* init 已调用且 ctrl_if 可用 */
@@ -58,25 +56,25 @@ static esp_codec_dev_handle_t s_codec;
 static i2s_chan_handle_t s_tx_chan;
 static const audio_codec_data_if_t *s_data_if;
 
-static int16_t s_sine_lut[256];            /* 满幅正弦表（首次 start 时填充） */
-static bool s_lut_ready;
 static int16_t s_chunk[AUD_CHUNK_FRAMES * 2]; /* 20ms 立体声块 1280B，静态避免任务栈压力 */
 
-/* 单块合成：pattern_pos_ms = 当前块在 1.6s 周期内的起点，elapsed_ms = 响铃已历时 */
-static void synth_chunk(int16_t *out, uint32_t pattern_pos_ms, uint32_t elapsed_ms)
+/* 单块装填：从内嵌 PCM 取 320 帧（循环回绕），乘渐入增益后复制到双声道。
+ * pos 为 PCM 内当前单声道样本下标（调用方持有，跨块推进）。 */
+static void pcm_chunk_fill(int16_t *out, size_t *pos, uint32_t elapsed_ms)
 {
-    uint32_t gain = alarm_fade_gain_q8(elapsed_ms); /* 渐入包络（Q8） */
-    uint32_t phase = 0;
-    /* 相位步进 = freq × 一圈 / 采样率（16k/2k 恰为整除，无相位误差） */
-    const uint32_t step = (uint32_t)((uint64_t)AUD_TONE_FREQ_HZ * AUD_PHASE_ONE_CYCLE / AUD_SAMPLE_RATE);
+    const int16_t *pcm = (const int16_t *)_binary_alarm_tone_pcm_start;
+    const size_t total = (size_t)(_binary_alarm_tone_pcm_end - _binary_alarm_tone_pcm_start) / sizeof(int16_t);
+    const int32_t gain = (int32_t)alarm_fade_gain_q8(elapsed_ms); /* 渐入包络（Q8） */
+    size_t p = *pos;
     for (int i = 0; i < AUD_CHUNK_FRAMES; i++) {
-        uint32_t t = pattern_pos_ms + (uint32_t)i * 1000u / AUD_SAMPLE_RATE;
-        bool beep_on = (t % 200u) < 100u && t < 700u; /* 前 4×[100ms 响,100ms 停] */
-        int32_t s = beep_on ? ((int32_t)s_sine_lut[phase >> 16] * (int32_t)gain >> 8) : 0;
-        *out++ = (int16_t)s;
-        *out++ = (int16_t)s; /* ES8311 单声道 DAC 取左路，双声道同值 */
-        phase += step;
+        int16_t s = (int16_t)(((int32_t)pcm[p] * gain) >> 8);
+        *out++ = s;
+        *out++ = s; /* ES8311 单声道 DAC 取左路，双声道同值 */
+        if (++p >= total) {
+            p = 0; /* 铃音循环 */
+        }
     }
+    *pos = p;
 }
 
 /* 整链拆除（建链的对偶序）：codec 关闭/删除 → codec_if → data_if → I2S 通道。
@@ -103,15 +101,15 @@ static void audio_chain_teardown(void)
     }
 }
 
-/* 播放任务：循环合成+阻塞写；停止时整链拆除（本任务上下文）后自删 */
+/* 播放任务：PCM 循环装填+阻塞写；停止时整链拆除（本任务上下文）后自删 */
 static void audio_alarm_task(void *arg)
 {
     (void)arg;
-    int64_t start_us = esp_timer_get_time();
+    const int64_t start_us = esp_timer_get_time();
     uint32_t elapsed_ms = 0;
+    size_t pcm_pos = 0;
     while (!s_stop_req) {
-        synth_chunk(s_chunk, (uint32_t)((esp_timer_get_time() - start_us) / 1000 % AUD_TONE_PERIOD_MS),
-                   elapsed_ms);
+        pcm_chunk_fill(s_chunk, &pcm_pos, elapsed_ms);
         if (esp_codec_dev_write(s_codec, s_chunk, sizeof(s_chunk)) != 0) {
             ESP_LOGE(TAG, "codec write failed, stop ringing");
             break;
@@ -242,12 +240,6 @@ bool hal_audio_alarm_start(void)
         return true; /* 幂等 */
     }
 
-    if (!s_lut_ready) {
-        for (int i = 0; i < 256; i++) {
-            s_sine_lut[i] = (int16_t)(32000.0 * sinf(i * 2.0f * (float)M_PI / 256.0f));
-        }
-        s_lut_ready = true;
-    }
     if (!audio_chain_build()) {
         return false;
     }
